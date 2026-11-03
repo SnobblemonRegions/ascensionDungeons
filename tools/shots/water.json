@@ -1,0 +1,152 @@
+[
+ {
+  "name": "r1_entry",
+  "pos": [
+   12,
+   9.6,
+   20
+  ],
+  "yaw": 90,
+  "pitch": -5
+ },
+ {
+  "name": "r1_pool",
+  "pos": [
+   16,
+   9.6,
+   20
+  ],
+  "yaw": 90,
+  "pitch": 0
+ },
+ {
+  "name": "r1_statue",
+  "pos": [
+   22,
+   9.6,
+   10
+  ],
+  "yaw": 170,
+  "pitch": 10
+ },
+ {
+  "name": "r2_hall",
+  "pos": [
+   52,
+   9.6,
+   19
+  ],
+  "yaw": 90,
+  "pitch": 0
+ },
+ {
+  "name": "r2_aqueduct",
+  "pos": [
+   70,
+   9.6,
+   26
+  ],
+  "yaw": 0,
+  "pitch": 12
+ },
+ {
+  "name": "r2_wheel",
+  "pos": [
+   66,
+   9.6,
+   24
+  ],
+  "yaw": 180,
+  "pitch": 12
+ },
+ {
+  "name": "r3_north",
+  "pos": [
+   84,
+   9.6,
+   38
+  ],
+  "yaw": 180,
+  "pitch": 0
+ },
+ {
+  "name": "r3_mid",
+  "pos": [
+   84,
+   9.6,
+   60
+  ],
+  "yaw": 180,
+  "pitch": 0
+ },
+ {
+  "name": "r4_mouth",
+  "pos": [
+   84,
+   9.6,
+   84
+  ],
+  "yaw": 180,
+  "pitch": 8
+ },
+ {
+  "name": "r4_gantry",
+  "pos": [
+   76,
+   9.6,
+   108
+  ],
+  "yaw": 270,
+  "pitch": 15
+ },
+ {
+  "name": "r4_pool",
+  "pos": [
+   84,
+   9.6,
+   90
+  ],
+  "yaw": 180,
+  "pitch": 0
+ },
+ {
+  "name": "r5_cathedral",
+  "pos": [
+   30,
+   6.0,
+   96
+  ],
+  "yaw": 270,
+  "pitch": 0
+ },
+ {
+  "name": "r5_lighthouse",
+  "pos": [
+   36,
+   6.0,
+   100
+  ],
+  "yaw": 180,
+  "pitch": 0
+ },
+ {
+  "name": "r6_in",
+  "pos": [
+   114,
+   9.6,
+   102
+  ],
+  "yaw": 90,
+  "pitch": 0
+ },
+ {
+  "name": "r6_crown",
+  "pos": [
+   134,
+   9.6,
+   120
+  ],
+  "yaw": 0,
+  "pitch": 10
+ }
+]

@@ -1,0 +1,102 @@
+[
+ {
+  "name": "01_entry_north",
+  "pos": [
+   88.5,
+   6.6,
+   150.5
+  ],
+  "yaw": 0.0,
+  "pitch": 3.0
+ },
+ {
+  "name": "02_north_room",
+  "pos": [
+   88.5,
+   6.6,
+   56.5
+  ],
+  "yaw": 0.0,
+  "pitch": 8.0
+ },
+ {
+  "name": "03_atrium_from_north",
+  "pos": [
+   88.5,
+   6.6,
+   70.5
+  ],
+  "yaw": 0.0,
+  "pitch": 8.0
+ },
+ {
+  "name": "04_tower_close",
+  "pos": [
+   88.5,
+   6.6,
+   112.5
+  ],
+  "yaw": 0.0,
+  "pitch": 26.0
+ },
+ {
+  "name": "05_tower_inside",
+  "pos": [
+   88.5,
+   6.6,
+   97.5
+  ],
+  "yaw": 0.0,
+  "pitch": 14.0
+ },
+ {
+  "name": "06_vault_front",
+  "pos": [
+   137.5,
+   6.6,
+   45.5
+  ],
+  "yaw": 0.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "07_arena_door",
+  "pos": [
+   106.5,
+   6.6,
+   137.5
+  ],
+  "yaw": 90.0,
+  "pitch": 4.0
+ },
+ {
+  "name": "08_arena_inside",
+  "pos": [
+   124.5,
+   6.6,
+   137.5
+  ],
+  "yaw": 90.0,
+  "pitch": 10.0
+ },
+ {
+  "name": "09_west_room",
+  "pos": [
+   44.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 90.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "10_chandelier",
+  "pos": [
+   88.5,
+   6.6,
+   134.5
+  ],
+  "yaw": 0.0,
+  "pitch": 38.0
+ }
+]

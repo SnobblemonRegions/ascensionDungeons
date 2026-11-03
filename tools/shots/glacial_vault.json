@@ -1,0 +1,102 @@
+[
+ {
+  "name": "01_entry_north",
+  "pos": [
+   88.5,
+   6.6,
+   150.5
+  ],
+  "yaw": 0.0,
+  "pitch": 3.0
+ },
+ {
+  "name": "02_arch",
+  "pos": [
+   88.5,
+   6.6,
+   80.5
+  ],
+  "yaw": 0.0,
+  "pitch": 12.0
+ },
+ {
+  "name": "03_nave_colonnade",
+  "pos": [
+   88.5,
+   6.6,
+   130.5
+  ],
+  "yaw": 0.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "04_reliquary",
+  "pos": [
+   35.5,
+   6.6,
+   82.5
+  ],
+  "yaw": 0.0,
+  "pitch": 8.0
+ },
+ {
+  "name": "05_mirrorwater",
+  "pos": [
+   118.5,
+   6.6,
+   72.5
+  ],
+  "yaw": 90.0,
+  "pitch": 8.0
+ },
+ {
+  "name": "06_aurora_door",
+  "pos": [
+   44.5,
+   6.6,
+   98.5
+  ],
+  "yaw": 180.0,
+  "pitch": 4.0
+ },
+ {
+  "name": "07_aurora_inside",
+  "pos": [
+   44.5,
+   6.6,
+   125.5
+  ],
+  "yaw": 180.0,
+  "pitch": 10.0
+ },
+ {
+  "name": "08_transept",
+  "pos": [
+   30.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 90.0,
+  "pitch": 5.0
+ },
+ {
+  "name": "09_stalactites_nave",
+  "pos": [
+   88.5,
+   6.6,
+   130.5
+  ],
+  "yaw": 0.0,
+  "pitch": 28.0
+ },
+ {
+  "name": "10_stalactites_transept",
+  "pos": [
+   40.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 90.0,
+  "pitch": 24.0
+ }
+]

@@ -1,0 +1,10 @@
+[
+ {"name": "01_entry_north", "pos": [88.5, 6.6, 150.5], "yaw": 0, "pitch": 3},
+ {"name": "02_grove", "pos": [60.5, 6.6, 88.5], "yaw": 0, "pitch": 20},
+ {"name": "03_cache_front", "pos": [29.5, 6.6, 88.5], "yaw": 0, "pitch": 8},
+ {"name": "04_spring", "pos": [96.5, 6.6, 114.5], "yaw": 90, "pitch": 8},
+ {"name": "05_arena_door", "pos": [96.5, 6.6, 84.5], "yaw": 30, "pitch": 6},
+ {"name": "06_arena_inside", "pos": [118.5, 6.6, 56.5], "yaw": 45, "pitch": 12},
+ {"name": "07_forest", "pos": [60.5, 6.6, 120.5], "yaw": 200, "pitch": 6},
+ {"name": "08_canopy", "pos": [88.5, 6.6, 130.5], "yaw": 20, "pitch": 32}
+]

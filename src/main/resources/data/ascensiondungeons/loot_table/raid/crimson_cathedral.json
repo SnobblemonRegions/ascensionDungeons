@@ -1,0 +1,39 @@
+{
+  "type": "minecraft:chest",
+  "pools": [
+    {
+      "rolls": {
+        "type": "minecraft:uniform",
+        "min": 2,
+        "max": 3
+      },
+      "entries": [
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:tiers/uncommon",
+          "weight": 30
+        },
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:tiers/rare",
+          "weight": 50
+        },
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:tiers/epic",
+          "weight": 20
+        }
+      ]
+    },
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:biome/crimson_cathedral",
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

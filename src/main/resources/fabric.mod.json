@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ascensiondungeons",
+  "version": "${version}",
+  "name": "Ascension Dungeons",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.ascensiondungeons.AscensionDungeons"
+    ]
+  },
+  "depends": {
+    "minecraft": "1.21.1",
+    "fabricloader": ">=0.17.2",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "cobbleraids": "*",
+    "cobblemon": "*",
+    "ascensionlib": "*"
+  }
+}

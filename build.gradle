@@ -1,0 +1,62 @@
+plugins {
+    id 'fabric-loom' version '1.14.7'
+    // Lets Loom's Kotlin metadata remapper handle Cobblemon's reflective serializers in dev.
+    id 'org.jetbrains.kotlin.jvm' version '2.2.20'
+}
+group = 'com.ascensiondungeons'
+version = '0.0.9-open-graveyard'
+base { archivesName = 'AscensionDungeons' }
+repositories {
+    maven { url = 'https://maven.nucleoid.xyz/' }
+    maven { url = 'https://maven.fabricmc.net/' }
+    exclusiveContent {
+        forRepository { maven { url = 'https://api.modrinth.com/maven' } }
+        filter { includeGroup 'maven.modrinth' }
+    }
+}
+dependencies {
+    minecraft 'com.mojang:minecraft:1.21.1'
+    mappings loom.officialMojangMappings()
+    modImplementation 'net.fabricmc:fabric-loader:0.17.2'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.116.6+1.21.1'
+    // Spike: only a "+1.21" build exists; the question is whether it runs on 1.21.1.
+    modImplementation 'maven.modrinth:MdwFAVRL:gBW3vLC7' // Cobblemon 1.8.1
+    modRuntimeOnly 'net.fabricmc:fabric-language-kotlin:1.13.6+kotlin.2.2.20'
+    compileOnly 'org.jetbrains.kotlin:kotlin-stdlib:2.2.20'
+    runtimeOnly 'org.graalvm.js:js:22.3.0'
+    runtimeOnly 'org.mongodb:mongodb-driver-sync:4.10.2'
+    modImplementation 'maven.modrinth:EltpO5cN:nar56EsW' // Lootr 1.11.38.127
+    modImplementation 'maven.modrinth:9s6osm5g:HpMb5wGb' // Cloth Config (Lootr dependency)
+    // Soft dependency: only the owned-encounter API package is used, and only when the mod is installed.
+    modCompileOnly files('L:/ascensionDungeons/testserver/mods-replaced-20261016/CobbleRaids-0.8.166-audit-hardening.jar')
+    modImplementation include('xyz.nucleoid:fantasy:0.6.4+1.21')
+}
+dependencies {
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+test { useJUnitPlatform() }
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+tasks.register('exportFirePilot', JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.ascensiondungeons.gen.type.ExportFirePilot'
+    args = [project.findProperty('exportDir') ?: 'outputs/fire-pilot']
+}
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand version: project.version }
+}
+
+// Minecraft declares ICU client-only, so Loom drops it from runServer; Cobblemon's Showdown service needs it.
+configurations { serverSimulatorRuntime }
+dependencies { serverSimulatorRuntime 'com.ibm.icu:icu4j:71.1' }
+tasks.named('runServer') { classpath += configurations.serverSimulatorRuntime }
+
+// Writes the landmark modules and composed district as .schem files for WorldEdit: gradlew exportLandmarks -PexportDir=...
+tasks.register('exportLandmarks', JavaExec) {
+    group = 'ascensiondungeons'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.ascensiondungeons.gen.ExportLandmarks'
+    args = [project.findProperty('exportDir') ?: 'outputs/landmarks', project.findProperty('biomes') ?: '']
+}

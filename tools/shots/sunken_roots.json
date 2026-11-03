@@ -1,0 +1,52 @@
+[
+ {
+  "name": "01_roots_up_a",
+  "pos": [
+   100.5,
+   6.6,
+   128.5
+  ],
+  "yaw": 45,
+  "pitch": 38
+ },
+ {
+  "name": "02_roots_up_b",
+  "pos": [
+   150.5,
+   6.6,
+   176.5
+  ],
+  "yaw": 200,
+  "pitch": 30
+ },
+ {
+  "name": "03_roots_along_axis",
+  "pos": [
+   128.5,
+   6.6,
+   200.5
+  ],
+  "yaw": 0,
+  "pitch": 22
+ },
+ {
+  "name": "04_terrace_roots",
+  "pos": [
+   164.5,
+   6.6,
+   62.5
+  ],
+  "yaw": 0,
+  "pitch": 20
+ },
+ {
+  "name": "05_terrace_close",
+  "pos": [
+   164.5,
+   6.6,
+   52.5
+  ],
+  "yaw": 0,
+  "pitch": 28
+ }
+]

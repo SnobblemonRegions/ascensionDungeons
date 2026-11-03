@@ -1,0 +1,132 @@
+[
+ {
+  "name": "01_entry_north",
+  "pos": [
+   88.5,
+   6.6,
+   150.5
+  ],
+  "yaw": 0,
+  "pitch": 3
+ },
+ {
+  "name": "02_crown",
+  "pos": [
+   84.5,
+   6.6,
+   134.5
+  ],
+  "yaw": 90,
+  "pitch": 14
+ },
+ {
+  "name": "03_lake_from_spine",
+  "pos": [
+   86.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 270,
+  "pitch": 4
+ },
+ {
+  "name": "04_causeway",
+  "pos": [
+   78.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 270,
+  "pitch": 4
+ },
+ {
+  "name": "05_kiln_cache",
+  "pos": [
+   39.5,
+   6.6,
+   128.5
+  ],
+  "yaw": 0,
+  "pitch": 8
+ },
+ {
+  "name": "06_crucible_door",
+  "pos": [
+   98.5,
+   6.6,
+   80.5
+  ],
+  "yaw": 35,
+  "pitch": 6
+ },
+ {
+  "name": "07_crucible_inside",
+  "pos": [
+   118.5,
+   6.6,
+   54.5
+  ],
+  "yaw": 45,
+  "pitch": 12
+ },
+ {
+  "name": "08_rim_terraces",
+  "pos": [
+   60.5,
+   6.6,
+   50.5
+  ],
+  "yaw": 315,
+  "pitch": 10
+ },
+ {
+  "name": "09_lake_edge",
+  "pos": [
+   80.5,
+   6.6,
+   95.5
+  ],
+  "yaw": 250,
+  "pitch": 10
+ },
+ {
+  "name": "10_ceiling",
+  "pos": [
+   100.5,
+   6.6,
+   110.5
+  ],
+  "yaw": 150,
+  "pitch": 32
+ },
+ {
+  "name": "11_geysers_a",
+  "pos": [
+   100.5,
+   6.6,
+   114.5
+  ],
+  "yaw": 0,
+  "pitch": 14
+ },
+ {
+  "name": "12_geysers_b",
+  "pos": [
+   125.5,
+   6.6,
+   110.5
+  ],
+  "yaw": 0,
+  "pitch": 14
+ },
+ {
+  "name": "13_geyser_close",
+  "pos": [
+   100.5,
+   6.6,
+   106.5
+  ],
+  "yaw": 0,
+  "pitch": 22
+ }
+]

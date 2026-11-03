@@ -1,0 +1,22 @@
+[
+ {
+  "name": "01_cryingobsidian",
+  "pos": [
+   207.5,
+   6.6,
+   98.5
+  ],
+  "yaw": 0.0,
+  "pitch": 60
+ },
+ {
+  "name": "02_cryingobsidian",
+  "pos": [
+   60.5,
+   6.6,
+   119.5
+  ],
+  "yaw": 0.0,
+  "pitch": 60
+ }
+]

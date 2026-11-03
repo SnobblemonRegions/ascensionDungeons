@@ -1,0 +1,48 @@
+{
+  "type": "minecraft:chest",
+  "pools": [
+    {
+      "rolls": {
+        "type": "minecraft:uniform",
+        "min": 3,
+        "max": 5
+      },
+      "entries": [
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:tiers/common",
+          "weight": 60
+        },
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:tiers/uncommon",
+          "weight": 28
+        },
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:tiers/rare",
+          "weight": 10
+        },
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:tiers/epic",
+          "weight": 2
+        }
+      ]
+    },
+    {
+      "rolls": {
+        "type": "minecraft:uniform",
+        "min": 1,
+        "max": 2
+      },
+      "entries": [
+        {
+          "type": "minecraft:loot_table",
+          "value": "ascensiondungeons:biome/ashen_caldera",
+          "weight": 1
+        }
+      ]
+    }
+  ]
+}

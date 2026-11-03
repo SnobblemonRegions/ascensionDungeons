@@ -1,0 +1,112 @@
+[
+ {
+  "name": "01_entry_north",
+  "pos": [
+   88.5,
+   6.6,
+   150.5
+  ],
+  "yaw": 0.0,
+  "pitch": 2.0
+ },
+ {
+  "name": "02_promenade_tidewheel",
+  "pos": [
+   110.5,
+   6.6,
+   61.5
+  ],
+  "yaw": 0.0,
+  "pitch": 14.0
+ },
+ {
+  "name": "03_causeway_to_island",
+  "pos": [
+   88.5,
+   6.6,
+   126.5
+  ],
+  "yaw": 0.0,
+  "pitch": 4.0
+ },
+ {
+  "name": "04_sluice_walk",
+  "pos": [
+   54.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 270.0,
+  "pitch": 3.0
+ },
+ {
+  "name": "05_vault_front",
+  "pos": [
+   141.5,
+   6.6,
+   48.5
+  ],
+  "yaw": 0.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "06_court_door",
+  "pos": [
+   82.5,
+   6.6,
+   137.5
+  ],
+  "yaw": 270.0,
+  "pitch": 4.0
+ },
+ {
+  "name": "07_court_inside",
+  "pos": [
+   62.5,
+   6.6,
+   137.5
+  ],
+  "yaw": 270.0,
+  "pitch": 8.0
+ },
+ {
+  "name": "08_basin_south",
+  "pos": [
+   88.5,
+   6.6,
+   122.5
+  ],
+  "yaw": 0.0,
+  "pitch": 8.0
+ },
+ {
+  "name": "09_ceiling",
+  "pos": [
+   88.5,
+   6.6,
+   30.5
+  ],
+  "yaw": 180.0,
+  "pitch": 28.0
+ },
+ {
+  "name": "10_pool_from_north",
+  "pos": [
+   88.5,
+   6.6,
+   64.5
+  ],
+  "yaw": 180.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "11_tidewheel_wide",
+  "pos": [
+   84.5,
+   6.6,
+   62.5
+  ],
+  "yaw": 60.0,
+  "pitch": 10.0
+ }
+]

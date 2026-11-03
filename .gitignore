@@ -1,0 +1,10 @@
+.gradle/
+build/
+run/
+
+# Local-only artifacts
+backups/
+outputs/
+scratch-*/
+testserver/
+*.log

@@ -1,0 +1,122 @@
+[
+ {
+  "name": "01_entry_north",
+  "pos": [
+   88.5,
+   6.6,
+   150.5
+  ],
+  "yaw": 0.0,
+  "pitch": 3.0
+ },
+ {
+  "name": "02_junction",
+  "pos": [
+   88.5,
+   6.6,
+   112.5
+  ],
+  "yaw": 0.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "03_furnace_heart",
+  "pos": [
+   41.5,
+   6.6,
+   64.5
+  ],
+  "yaw": 0.0,
+  "pitch": 10.0
+ },
+ {
+  "name": "04_furnace_close",
+  "pos": [
+   41.5,
+   6.6,
+   48.5
+  ],
+  "yaw": 0.0,
+  "pitch": 14.0
+ },
+ {
+  "name": "05_cache_front",
+  "pos": [
+   105.5,
+   6.6,
+   50.5
+  ],
+  "yaw": 0.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "06_gantry_from_east",
+  "pos": [
+   64.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 270.0,
+  "pitch": 5.0
+ },
+ {
+  "name": "07_gantry_deck",
+  "pos": [
+   52.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 270.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "08_arena_door",
+  "pos": [
+   98.5,
+   6.6,
+   130.5
+  ],
+  "yaw": 90.0,
+  "pitch": 4.0
+ },
+ {
+  "name": "09_arena_anvil",
+  "pos": [
+   120.5,
+   6.6,
+   130.5
+  ],
+  "yaw": 90.0,
+  "pitch": 22.0
+ },
+ {
+  "name": "10_forge_hall",
+  "pos": [
+   66.5,
+   6.6,
+   60.5
+  ],
+  "yaw": 215.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "11_ceiling_girders",
+  "pos": [
+   88.5,
+   6.6,
+   70.5
+  ],
+  "yaw": 30.0,
+  "pitch": 32.0
+ },
+ {
+  "name": "12_assembly_hall",
+  "pos": [
+   70.5,
+   6.6,
+   135.5
+  ],
+  "yaw": 200.0,
+  "pitch": 6.0
+ }
+]

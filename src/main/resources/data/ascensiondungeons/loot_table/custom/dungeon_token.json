@@ -1,0 +1,31 @@
+{
+  "type": "minecraft:chest",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:paper",
+          "functions": [
+            {
+              "function": "minecraft:set_components",
+              "components": {
+                "minecraft:custom_name": "{\"text\": \"Dungeon Token\", \"italic\": false, \"color\": \"gold\"}",
+                "minecraft:lore": [
+                  "{\"text\": \"PLACEHOLDER custom item\", \"italic\": false, \"color\": \"gray\"}"
+                ],
+                "minecraft:custom_model_data": 1001,
+                "minecraft:custom_data": {
+                  "ascension": {
+                    "id": "dungeon_token"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

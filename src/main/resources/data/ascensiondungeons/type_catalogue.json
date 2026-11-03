@@ -1,0 +1,1604 @@
+[
+  {
+    "id": "normal",
+    "rooms": [
+      "Meadow Refuge",
+      "Abandoned Market Gallery",
+      "Millrace Walk",
+      "Village Commons",
+      "Homestead Cellar"
+    ],
+    "landmarks": [
+      {
+        "id": "great_hearth",
+        "name": "Great Hearth",
+        "role": "focal"
+      },
+      {
+        "id": "broken_windmill",
+        "name": "Broken Windmill",
+        "role": "focal"
+      },
+      {
+        "id": "rootbound_bell_tower",
+        "name": "Rootbound Bell Tower",
+        "role": "focal"
+      },
+      {
+        "id": "overgrown_market_pavilion",
+        "name": "Overgrown Market Pavilion",
+        "role": "focal"
+      },
+      {
+        "id": "stone_waterwheel",
+        "name": "Stone Waterwheel",
+        "role": "focal"
+      },
+      {
+        "id": "supply_exchange",
+        "name": "Supply Exchange",
+        "role": "interactive"
+      },
+      {
+        "id": "orchard_harvest_shrine",
+        "name": "Orchard Harvest Shrine",
+        "role": "interactive"
+      },
+      {
+        "id": "training_yard",
+        "name": "Training Yard",
+        "role": "interactive"
+      },
+      {
+        "id": "route_signpost_puzzle",
+        "name": "Route Signpost Puzzle",
+        "role": "interactive"
+      },
+      {
+        "id": "rest_station",
+        "name": "Rest Station",
+        "role": "interactive"
+      },
+      {
+        "id": "attic_cache",
+        "name": "Attic Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "buried_pantry",
+        "name": "Buried Pantry",
+        "role": "discovery"
+      },
+      {
+        "id": "abandoned_nest",
+        "name": "Abandoned Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "cellar_strongbox",
+        "name": "Cellar Strongbox",
+        "role": "discovery"
+      },
+      {
+        "id": "traveling_scholar_s_camp",
+        "name": "Traveling Scholar's Camp",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Hearthwarden Hall",
+    "playable": false
+  },
+  {
+    "id": "fire",
+    "rooms": [
+      "Ember Grove",
+      "Furnace Gallery",
+      "Basalt Fissure",
+      "Cinder Court",
+      "Kiln Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "cinder_crown",
+        "name": "Cinder Crown",
+        "role": "focal"
+      },
+      {
+        "id": "basalt_chimney",
+        "name": "Basalt Chimney",
+        "role": "focal"
+      },
+      {
+        "id": "broken_crucible",
+        "name": "Broken Crucible",
+        "role": "focal"
+      },
+      {
+        "id": "obsidian_arch",
+        "name": "Obsidian Arch",
+        "role": "focal"
+      },
+      {
+        "id": "petrified_ember_tree",
+        "name": "Petrified Ember Tree",
+        "role": "focal"
+      },
+      {
+        "id": "furnace_ignition_altar",
+        "name": "Furnace Ignition Altar",
+        "role": "interactive"
+      },
+      {
+        "id": "cooling_valve",
+        "name": "Cooling Valve",
+        "role": "interactive"
+      },
+      {
+        "id": "ember_offering_brazier",
+        "name": "Ember Offering Brazier",
+        "role": "interactive"
+      },
+      {
+        "id": "tempering_anvil",
+        "name": "Tempering Anvil",
+        "role": "interactive"
+      },
+      {
+        "id": "ash_trial_circle",
+        "name": "Ash Trial Circle",
+        "role": "interactive"
+      },
+      {
+        "id": "kiln_cache",
+        "name": "Kiln Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "charred_library",
+        "name": "Charred Library",
+        "role": "discovery"
+      },
+      {
+        "id": "magma_geode",
+        "name": "Magma Geode",
+        "role": "discovery"
+      },
+      {
+        "id": "sealed_smelter_locker",
+        "name": "Sealed Smelter Locker",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_soot_passage",
+        "name": "Hidden Soot Passage",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Crucible of the First Flame",
+    "playable": true
+  },
+  {
+    "id": "water",
+    "rooms": [
+      "Reservoir Grotto",
+      "Aqueduct Gallery",
+      "Canal Crossing",
+      "Tidal Court",
+      "Sunken Archive"
+    ],
+    "landmarks": [
+      {
+        "id": "drowned_statue",
+        "name": "Drowned Statue",
+        "role": "focal"
+      },
+      {
+        "id": "coral_cathedral",
+        "name": "Coral Cathedral",
+        "role": "focal"
+      },
+      {
+        "id": "broken_aqueduct",
+        "name": "Broken Aqueduct",
+        "role": "focal"
+      },
+      {
+        "id": "reservoir_wheel",
+        "name": "Reservoir Wheel",
+        "role": "focal"
+      },
+      {
+        "id": "sunken_lighthouse",
+        "name": "Sunken Lighthouse",
+        "role": "focal"
+      },
+      {
+        "id": "sluice_control",
+        "name": "Sluice Control",
+        "role": "interactive"
+      },
+      {
+        "id": "conduit_shrine",
+        "name": "Conduit Shrine",
+        "role": "interactive"
+      },
+      {
+        "id": "tide_offering_basin",
+        "name": "Tide Offering Basin",
+        "role": "interactive"
+      },
+      {
+        "id": "floodgate_switch",
+        "name": "Floodgate Switch",
+        "role": "interactive"
+      },
+      {
+        "id": "pearl_trial_pool",
+        "name": "Pearl Trial Pool",
+        "role": "interactive"
+      },
+      {
+        "id": "diver_s_cache",
+        "name": "Diver's Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "barnacled_strongbox",
+        "name": "Barnacled Strongbox",
+        "role": "discovery"
+      },
+      {
+        "id": "submerged_habitat_niche",
+        "name": "Submerged Habitat Niche",
+        "role": "discovery"
+      },
+      {
+        "id": "lost_chart_alcove",
+        "name": "Lost Chart Alcove",
+        "role": "discovery"
+      },
+      {
+        "id": "coral_tunnel",
+        "name": "Coral Tunnel",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Drowned Crown Basin",
+    "playable": false
+  },
+  {
+    "id": "grass",
+    "rooms": [
+      "Rootwood Grove",
+      "Conservatory Gallery",
+      "Vine Ravine",
+      "Bloom Court",
+      "Seed Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "elderroot_tree",
+        "name": "Elderroot Tree",
+        "role": "focal"
+      },
+      {
+        "id": "hanging_conservatory",
+        "name": "Hanging Conservatory",
+        "role": "focal"
+      },
+      {
+        "id": "thorn_arch",
+        "name": "Thorn Arch",
+        "role": "focal"
+      },
+      {
+        "id": "giant_lotus",
+        "name": "Giant Lotus",
+        "role": "focal"
+      },
+      {
+        "id": "mossbound_watchtower",
+        "name": "Mossbound Watchtower",
+        "role": "focal"
+      },
+      {
+        "id": "seed_offering_shrine",
+        "name": "Seed Offering Shrine",
+        "role": "interactive"
+      },
+      {
+        "id": "pruning_gate",
+        "name": "Pruning Gate",
+        "role": "interactive"
+      },
+      {
+        "id": "growth_trial_circle",
+        "name": "Growth Trial Circle",
+        "role": "interactive"
+      },
+      {
+        "id": "pollination_garden",
+        "name": "Pollination Garden",
+        "role": "interactive"
+      },
+      {
+        "id": "herbalist_station",
+        "name": "Herbalist Station",
+        "role": "interactive"
+      },
+      {
+        "id": "root_cache",
+        "name": "Root Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "hollow_log_nest",
+        "name": "Hollow Log Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "forgotten_greenhouse",
+        "name": "Forgotten Greenhouse",
+        "role": "discovery"
+      },
+      {
+        "id": "flowerbed_strongbox",
+        "name": "Flowerbed Strongbox",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_fern_tunnel",
+        "name": "Hidden Fern Tunnel",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Elderroot Sanctuary",
+    "playable": false
+  },
+  {
+    "id": "electric",
+    "rooms": [
+      "Charged Garden",
+      "Coil Gallery",
+      "Cable Ravine",
+      "Dynamo Court",
+      "Capacitor Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "storm_coil",
+        "name": "Storm Coil",
+        "role": "focal"
+      },
+      {
+        "id": "copper_spire",
+        "name": "Copper Spire",
+        "role": "focal"
+      },
+      {
+        "id": "shattered_dynamo",
+        "name": "Shattered Dynamo",
+        "role": "focal"
+      },
+      {
+        "id": "charged_crystal_array",
+        "name": "Charged Crystal Array",
+        "role": "focal"
+      },
+      {
+        "id": "cable_suspension_mast",
+        "name": "Cable Suspension Mast",
+        "role": "focal"
+      },
+      {
+        "id": "relay_alignment_panel",
+        "name": "Relay Alignment Panel",
+        "role": "interactive"
+      },
+      {
+        "id": "capacitor_offering",
+        "name": "Capacitor Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "grounding_switch",
+        "name": "Grounding Switch",
+        "role": "interactive"
+      },
+      {
+        "id": "spark_trial_circle",
+        "name": "Spark Trial Circle",
+        "role": "interactive"
+      },
+      {
+        "id": "power_routing_console",
+        "name": "Power Routing Console",
+        "role": "interactive"
+      },
+      {
+        "id": "maintenance_locker",
+        "name": "Maintenance Locker",
+        "role": "discovery"
+      },
+      {
+        "id": "insulated_cache",
+        "name": "Insulated Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "buried_cable_niche",
+        "name": "Buried Cable Niche",
+        "role": "discovery"
+      },
+      {
+        "id": "abandoned_engineer_s_bench",
+        "name": "Abandoned Engineer's Bench",
+        "role": "discovery"
+      },
+      {
+        "id": "static_habitat_alcove",
+        "name": "Static Habitat Alcove",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Stormheart Reactor",
+    "playable": false
+  },
+  {
+    "id": "ice",
+    "rooms": [
+      "Frost Habitat",
+      "Glacier Gallery",
+      "Crevasse Crossing",
+      "Aurora Court",
+      "Rime Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "frozen_cascade",
+        "name": "Frozen Cascade",
+        "role": "focal"
+      },
+      {
+        "id": "ice_crown",
+        "name": "Ice Crown",
+        "role": "focal"
+      },
+      {
+        "id": "snowbound_observatory",
+        "name": "Snowbound Observatory",
+        "role": "focal"
+      },
+      {
+        "id": "glacier_arch",
+        "name": "Glacier Arch",
+        "role": "focal"
+      },
+      {
+        "id": "crystal_rime_tree",
+        "name": "Crystal Rime Tree",
+        "role": "focal"
+      },
+      {
+        "id": "thermal_balance_shrine",
+        "name": "Thermal Balance Shrine",
+        "role": "interactive"
+      },
+      {
+        "id": "frost_offering",
+        "name": "Frost Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "thaw_valve",
+        "name": "Thaw Valve",
+        "role": "interactive"
+      },
+      {
+        "id": "aurora_alignment_pedestal",
+        "name": "Aurora Alignment Pedestal",
+        "role": "interactive"
+      },
+      {
+        "id": "rime_trial_circle",
+        "name": "Rime Trial Circle",
+        "role": "interactive"
+      },
+      {
+        "id": "frost_locker",
+        "name": "Frost Locker",
+        "role": "discovery"
+      },
+      {
+        "id": "frozen_expedition_camp",
+        "name": "Frozen Expedition Camp",
+        "role": "discovery"
+      },
+      {
+        "id": "ice_cave_nest",
+        "name": "Ice Cave Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "snowdrift_cache",
+        "name": "Snowdrift Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "preserved_relic_niche",
+        "name": "Preserved Relic Niche",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Crown of Winter",
+    "playable": false
+  },
+  {
+    "id": "fighting",
+    "rooms": [
+      "Training Grove",
+      "Sparring Gallery",
+      "Ascetic Steps",
+      "Tournament Court",
+      "Champion Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "monumental_training_bell",
+        "name": "Monumental Training Bell",
+        "role": "focal"
+      },
+      {
+        "id": "champion_statue",
+        "name": "Champion Statue",
+        "role": "focal"
+      },
+      {
+        "id": "stone_practice_pillars",
+        "name": "Stone Practice Pillars",
+        "role": "focal"
+      },
+      {
+        "id": "ascetic_gate",
+        "name": "Ascetic Gate",
+        "role": "focal"
+      },
+      {
+        "id": "tournament_banner_hall",
+        "name": "Tournament Banner Hall",
+        "role": "focal"
+      },
+      {
+        "id": "sparring_trial",
+        "name": "Sparring Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "endurance_shrine",
+        "name": "Endurance Shrine",
+        "role": "interactive"
+      },
+      {
+        "id": "balance_route_challenge",
+        "name": "Balance Route Challenge",
+        "role": "interactive"
+      },
+      {
+        "id": "discipline_offering",
+        "name": "Discipline Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "champion_s_challenge_board",
+        "name": "Champion's Challenge Board",
+        "role": "interactive"
+      },
+      {
+        "id": "retired_master_s_cache",
+        "name": "Retired Master's Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "meditation_alcove",
+        "name": "Meditation Alcove",
+        "role": "discovery"
+      },
+      {
+        "id": "training_equipment_locker",
+        "name": "Training Equipment Locker",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_dojo_scroll",
+        "name": "Hidden Dojo Scroll",
+        "role": "discovery"
+      },
+      {
+        "id": "spectator_balcony_stash",
+        "name": "Spectator Balcony Stash",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Grandmaster Circle",
+    "playable": false
+  },
+  {
+    "id": "poison",
+    "rooms": [
+      "Fungal Marsh",
+      "Alchemical Gallery",
+      "Sludge Causeway",
+      "Spore Court",
+      "Quarantine Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "giant_sporecap",
+        "name": "Giant Sporecap",
+        "role": "focal"
+      },
+      {
+        "id": "alchemical_retort",
+        "name": "Alchemical Retort",
+        "role": "focal"
+      },
+      {
+        "id": "corroded_reservoir",
+        "name": "Corroded Reservoir",
+        "role": "focal"
+      },
+      {
+        "id": "venom_orchid",
+        "name": "Venom Orchid",
+        "role": "focal"
+      },
+      {
+        "id": "quarantine_monument",
+        "name": "Quarantine Monument",
+        "role": "focal"
+      },
+      {
+        "id": "purification_valve",
+        "name": "Purification Valve",
+        "role": "interactive"
+      },
+      {
+        "id": "reagent_offering",
+        "name": "Reagent Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "antidote_station",
+        "name": "Antidote Station",
+        "role": "interactive"
+      },
+      {
+        "id": "ventilation_switch",
+        "name": "Ventilation Switch",
+        "role": "interactive"
+      },
+      {
+        "id": "spore_trial_circle",
+        "name": "Spore Trial Circle",
+        "role": "interactive"
+      },
+      {
+        "id": "sealed_reagent_cache",
+        "name": "Sealed Reagent Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "abandoned_laboratory",
+        "name": "Abandoned Laboratory",
+        "role": "discovery"
+      },
+      {
+        "id": "hollow_fungus_nest",
+        "name": "Hollow Fungus Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "corroded_locker",
+        "name": "Corroded Locker",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_drain_passage",
+        "name": "Hidden Drain Passage",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Venomheart Chamber",
+    "playable": false
+  },
+  {
+    "id": "ground",
+    "rooms": [
+      "Burrow Habitat",
+      "Excavation Gallery",
+      "Faultline Steps",
+      "Dune Court",
+      "Buried Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "fault_pillar",
+        "name": "Fault Pillar",
+        "role": "focal"
+      },
+      {
+        "id": "excavator_wheel",
+        "name": "Excavator Wheel",
+        "role": "focal"
+      },
+      {
+        "id": "sandstone_root_arch",
+        "name": "Sandstone Root Arch",
+        "role": "focal"
+      },
+      {
+        "id": "buried_colossus",
+        "name": "Buried Colossus",
+        "role": "focal"
+      },
+      {
+        "id": "terraced_burrow_mound",
+        "name": "Terraced Burrow Mound",
+        "role": "focal"
+      },
+      {
+        "id": "excavation_trial",
+        "name": "Excavation Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "survey_alignment",
+        "name": "Survey Alignment",
+        "role": "interactive"
+      },
+      {
+        "id": "earth_offering",
+        "name": "Earth Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "sandgate_control",
+        "name": "Sandgate Control",
+        "role": "interactive"
+      },
+      {
+        "id": "burrow_route_switch",
+        "name": "Burrow Route Switch",
+        "role": "interactive"
+      },
+      {
+        "id": "fossil_pocket",
+        "name": "Fossil Pocket",
+        "role": "discovery"
+      },
+      {
+        "id": "prospector_s_cache",
+        "name": "Prospector's Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "buried_supply_wagon",
+        "name": "Buried Supply Wagon",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_burrow_nest",
+        "name": "Hidden Burrow Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "sealed_survey_vault",
+        "name": "Sealed Survey Vault",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Worldroot Fault",
+    "playable": false
+  },
+  {
+    "id": "flying",
+    "rooms": [
+      "High-Roof Aviary",
+      "Wind Gallery",
+      "Skybridge Chasm",
+      "Updraft Court",
+      "Cliffside Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "wind_harp",
+        "name": "Wind Harp",
+        "role": "focal"
+      },
+      {
+        "id": "suspended_aviary",
+        "name": "Suspended Aviary",
+        "role": "focal"
+      },
+      {
+        "id": "broken_roost_tower",
+        "name": "Broken Roost Tower",
+        "role": "focal"
+      },
+      {
+        "id": "feather_arch",
+        "name": "Feather Arch",
+        "role": "focal"
+      },
+      {
+        "id": "skybridge_beacon",
+        "name": "Skybridge Beacon",
+        "role": "focal"
+      },
+      {
+        "id": "airflow_alignment",
+        "name": "Airflow Alignment",
+        "role": "interactive"
+      },
+      {
+        "id": "feather_offering",
+        "name": "Feather Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "bridge_winch",
+        "name": "Bridge Winch",
+        "role": "interactive"
+      },
+      {
+        "id": "beacon_trial",
+        "name": "Beacon Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "roost_steward_station",
+        "name": "Roost Steward Station",
+        "role": "interactive"
+      },
+      {
+        "id": "cliff_nest",
+        "name": "Cliff Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "hanging_cache",
+        "name": "Hanging Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "abandoned_glider_camp",
+        "name": "Abandoned Glider Camp",
+        "role": "discovery"
+      },
+      {
+        "id": "upper_gallery_stash",
+        "name": "Upper Gallery Stash",
+        "role": "discovery"
+      },
+      {
+        "id": "windward_map_niche",
+        "name": "Windward Map Niche",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Eye of the Gale",
+    "playable": false
+  },
+  {
+    "id": "psychic",
+    "rooms": [
+      "Thought Garden",
+      "Reflection Gallery",
+      "Folded Stair Hall",
+      "Astral Court",
+      "Memory Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "astral_orrery",
+        "name": "Astral Orrery",
+        "role": "focal"
+      },
+      {
+        "id": "reflection_monolith",
+        "name": "Reflection Monolith",
+        "role": "focal"
+      },
+      {
+        "id": "floating_rune_sculpture",
+        "name": "Floating-Rune Sculpture",
+        "role": "focal"
+      },
+      {
+        "id": "twin_thought_statues",
+        "name": "Twin Thought Statues",
+        "role": "focal"
+      },
+      {
+        "id": "mindglass_arch",
+        "name": "Mindglass Arch",
+        "role": "focal"
+      },
+      {
+        "id": "constellation_alignment",
+        "name": "Constellation Alignment",
+        "role": "interactive"
+      },
+      {
+        "id": "memory_sequence_pedestal",
+        "name": "Memory Sequence Pedestal",
+        "role": "interactive"
+      },
+      {
+        "id": "focus_offering",
+        "name": "Focus Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "reflection_trial",
+        "name": "Reflection Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "astral_lens_control",
+        "name": "Astral Lens Control",
+        "role": "interactive"
+      },
+      {
+        "id": "scholar_s_cache",
+        "name": "Scholar's Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "sealed_thought_tablet",
+        "name": "Sealed Thought Tablet",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_mirror_alcove",
+        "name": "Hidden Mirror Alcove",
+        "role": "discovery"
+      },
+      {
+        "id": "dream_habitat_niche",
+        "name": "Dream Habitat Niche",
+        "role": "discovery"
+      },
+      {
+        "id": "forgotten_observatory_desk",
+        "name": "Forgotten Observatory Desk",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Mindstar Observatory",
+    "playable": false
+  },
+  {
+    "id": "bug",
+    "rooms": [
+      "Colony Habitat",
+      "Silk Gallery",
+      "Webbed Ravine",
+      "Hive Court",
+      "Amber Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "giant_chrysalis",
+        "name": "Giant Chrysalis",
+        "role": "focal"
+      },
+      {
+        "id": "amber_tree",
+        "name": "Amber Tree",
+        "role": "focal"
+      },
+      {
+        "id": "colony_mound",
+        "name": "Colony Mound",
+        "role": "focal"
+      },
+      {
+        "id": "silk_canopy",
+        "name": "Silk Canopy",
+        "role": "focal"
+      },
+      {
+        "id": "monarch_wing_monument",
+        "name": "Monarch Wing Monument",
+        "role": "focal"
+      },
+      {
+        "id": "nectar_offering",
+        "name": "Nectar Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "colony_route_switch",
+        "name": "Colony Route Switch",
+        "role": "interactive"
+      },
+      {
+        "id": "cocoon_trial",
+        "name": "Cocoon Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "silk_bridge_winch",
+        "name": "Silk Bridge Winch",
+        "role": "interactive"
+      },
+      {
+        "id": "pollinator_station",
+        "name": "Pollinator Station",
+        "role": "interactive"
+      },
+      {
+        "id": "amber_cache",
+        "name": "Amber Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "hollow_hive_nest",
+        "name": "Hollow Hive Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "silk_wrapped_strongbox",
+        "name": "Silk-Wrapped Strongbox",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_larval_alcove",
+        "name": "Hidden Larval Alcove",
+        "role": "discovery"
+      },
+      {
+        "id": "naturalist_s_camp",
+        "name": "Naturalist's Camp",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Monarch Brood Chamber",
+    "playable": false
+  },
+  {
+    "id": "rock",
+    "rooms": [
+      "Mineral Habitat",
+      "Fossil Gallery",
+      "Boulder Canyon",
+      "Quarry Court",
+      "Geode Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "giant_geode",
+        "name": "Giant Geode",
+        "role": "focal"
+      },
+      {
+        "id": "fossil_rib_arch",
+        "name": "Fossil Rib Arch",
+        "role": "focal"
+      },
+      {
+        "id": "quarry_crane",
+        "name": "Quarry Crane",
+        "role": "focal"
+      },
+      {
+        "id": "balanced_stone_cairn",
+        "name": "Balanced Stone Cairn",
+        "role": "focal"
+      },
+      {
+        "id": "petrified_colossus",
+        "name": "Petrified Colossus",
+        "role": "focal"
+      },
+      {
+        "id": "mineral_offering",
+        "name": "Mineral Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "quarry_route_control",
+        "name": "Quarry Route Control",
+        "role": "interactive"
+      },
+      {
+        "id": "resonance_trial",
+        "name": "Resonance Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "stone_alignment_puzzle",
+        "name": "Stone Alignment Puzzle",
+        "role": "interactive"
+      },
+      {
+        "id": "excavator_station",
+        "name": "Excavator Station",
+        "role": "interactive"
+      },
+      {
+        "id": "fossil_cache",
+        "name": "Fossil Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "geode_habitat_pocket",
+        "name": "Geode Habitat Pocket",
+        "role": "discovery"
+      },
+      {
+        "id": "miner_s_strongbox",
+        "name": "Miner's Strongbox",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_scree_tunnel",
+        "name": "Hidden Scree Tunnel",
+        "role": "discovery"
+      },
+      {
+        "id": "abandoned_survey_camp",
+        "name": "Abandoned Survey Camp",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Titan's Cairn",
+    "playable": false
+  },
+  {
+    "id": "ghost",
+    "rooms": [
+      "Mourning Garden",
+      "Whisper Gallery",
+      "Processional Crypt",
+      "Lantern Court",
+      "Reliquary Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "mourning_bell",
+        "name": "Mourning Bell",
+        "role": "focal"
+      },
+      {
+        "id": "broken_mausoleum",
+        "name": "Broken Mausoleum",
+        "role": "focal"
+      },
+      {
+        "id": "lantern_tree",
+        "name": "Lantern Tree",
+        "role": "focal"
+      },
+      {
+        "id": "processional_statue",
+        "name": "Processional Statue",
+        "role": "focal"
+      },
+      {
+        "id": "empty_throne_monument",
+        "name": "Empty Throne Monument",
+        "role": "focal"
+      },
+      {
+        "id": "lantern_offering",
+        "name": "Lantern Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "memorial_sequence",
+        "name": "Memorial Sequence",
+        "role": "interactive"
+      },
+      {
+        "id": "whisper_trial",
+        "name": "Whisper Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "crypt_seal_switch",
+        "name": "Crypt Seal Switch",
+        "role": "interactive"
+      },
+      {
+        "id": "spirit_guide_station",
+        "name": "Spirit Guide Station",
+        "role": "interactive"
+      },
+      {
+        "id": "reliquary_cache",
+        "name": "Reliquary Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "forgotten_epitaph",
+        "name": "Forgotten Epitaph",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_mourning_niche",
+        "name": "Hidden Mourning Niche",
+        "role": "discovery"
+      },
+      {
+        "id": "sealed_funeral_chest",
+        "name": "Sealed Funeral Chest",
+        "role": "discovery"
+      },
+      {
+        "id": "quiet_spirit_habitat",
+        "name": "Quiet Spirit Habitat",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Hollow Bell Sanctum",
+    "playable": false
+  },
+  {
+    "id": "dragon",
+    "rooms": [
+      "Ancient Roost",
+      "Scale Gallery",
+      "Spinebridge Chasm",
+      "Wyrm Court",
+      "Hoard Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "dragonbone_arch",
+        "name": "Dragonbone Arch",
+        "role": "focal"
+      },
+      {
+        "id": "scale_obelisk",
+        "name": "Scale Obelisk",
+        "role": "focal"
+      },
+      {
+        "id": "ancient_roost_crown",
+        "name": "Ancient Roost Crown",
+        "role": "focal"
+      },
+      {
+        "id": "wyrm_statue",
+        "name": "Wyrm Statue",
+        "role": "focal"
+      },
+      {
+        "id": "shattered_hoard_gate",
+        "name": "Shattered Hoard Gate",
+        "role": "focal"
+      },
+      {
+        "id": "hoard_offering",
+        "name": "Hoard Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "scale_alignment",
+        "name": "Scale Alignment",
+        "role": "interactive"
+      },
+      {
+        "id": "wyrm_trial",
+        "name": "Wyrm Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "roost_beacon",
+        "name": "Roost Beacon",
+        "role": "interactive"
+      },
+      {
+        "id": "ancient_seal_control",
+        "name": "Ancient Seal Control",
+        "role": "interactive"
+      },
+      {
+        "id": "hoard_fragment_cache",
+        "name": "Hoard Fragment Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "hatchling_habitat_niche",
+        "name": "Hatchling Habitat Niche",
+        "role": "discovery"
+      },
+      {
+        "id": "lost_rider_camp",
+        "name": "Lost Rider Camp",
+        "role": "discovery"
+      },
+      {
+        "id": "sealed_chronicle_vault",
+        "name": "Sealed Chronicle Vault",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_spine_tunnel",
+        "name": "Hidden Spine Tunnel",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Elder Wyrm Crucible",
+    "playable": false
+  },
+  {
+    "id": "dark",
+    "rooms": [
+      "Twilight Habitat",
+      "Shadow Gallery",
+      "Blackwater Crossing",
+      "Eclipse Court",
+      "Contraband Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "eclipse_monument",
+        "name": "Eclipse Monument",
+        "role": "focal"
+      },
+      {
+        "id": "blackwater_watchtower",
+        "name": "Blackwater Watchtower",
+        "role": "focal"
+      },
+      {
+        "id": "masked_statue",
+        "name": "Masked Statue",
+        "role": "focal"
+      },
+      {
+        "id": "broken_shadow_gate",
+        "name": "Broken Shadow Gate",
+        "role": "focal"
+      },
+      {
+        "id": "twilight_canopy",
+        "name": "Twilight Canopy",
+        "role": "focal"
+      },
+      {
+        "id": "shadow_alignment",
+        "name": "Shadow Alignment",
+        "role": "interactive"
+      },
+      {
+        "id": "mask_offering",
+        "name": "Mask Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "watchpost_trial",
+        "name": "Watchpost Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "hidden_route_lever",
+        "name": "Hidden Route Lever",
+        "role": "interactive"
+      },
+      {
+        "id": "smuggler_s_exchange",
+        "name": "Smuggler's Exchange",
+        "role": "interactive"
+      },
+      {
+        "id": "contraband_cache",
+        "name": "Contraband Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "false_wall_strongbox",
+        "name": "False-Wall Strongbox",
+        "role": "discovery"
+      },
+      {
+        "id": "silent_habitat_alcove",
+        "name": "Silent Habitat Alcove",
+        "role": "discovery"
+      },
+      {
+        "id": "abandoned_scout_camp",
+        "name": "Abandoned Scout Camp",
+        "role": "discovery"
+      },
+      {
+        "id": "concealed_ledger_niche",
+        "name": "Concealed Ledger Niche",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Throne of the Eclipse",
+    "playable": false
+  },
+  {
+    "id": "steel",
+    "rooms": [
+      "Reclaimed Foundry",
+      "Assembly Gallery",
+      "Gantry Crossing",
+      "Anvil Court",
+      "Armory Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "monumental_anvil",
+        "name": "Monumental Anvil",
+        "role": "focal"
+      },
+      {
+        "id": "assembly_crane",
+        "name": "Assembly Crane",
+        "role": "focal"
+      },
+      {
+        "id": "gear_crown",
+        "name": "Gear Crown",
+        "role": "focal"
+      },
+      {
+        "id": "iron_colossus",
+        "name": "Iron Colossus",
+        "role": "focal"
+      },
+      {
+        "id": "foundry_furnace_heart",
+        "name": "Foundry Furnace Heart",
+        "role": "focal"
+      },
+      {
+        "id": "forging_offering",
+        "name": "Forging Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "assembly_alignment",
+        "name": "Assembly Alignment",
+        "role": "interactive"
+      },
+      {
+        "id": "gantry_control",
+        "name": "Gantry Control",
+        "role": "interactive"
+      },
+      {
+        "id": "riveter_trial",
+        "name": "Riveter Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "armorer_station",
+        "name": "Armorer Station",
+        "role": "interactive"
+      },
+      {
+        "id": "armory_cache",
+        "name": "Armory Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "maintenance_tunnel_locker",
+        "name": "Maintenance Tunnel Locker",
+        "role": "discovery"
+      },
+      {
+        "id": "buried_blueprint_desk",
+        "name": "Buried Blueprint Desk",
+        "role": "discovery"
+      },
+      {
+        "id": "reclaimed_machine_habitat",
+        "name": "Reclaimed Machine Habitat",
+        "role": "discovery"
+      },
+      {
+        "id": "sealed_parts_vault",
+        "name": "Sealed Parts Vault",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Sovereign Forge",
+    "playable": false
+  },
+  {
+    "id": "fairy",
+    "rooms": [
+      "Moonflower Grove",
+      "Storybook Gallery",
+      "Ribbonbridge Hollow",
+      "Petal Court",
+      "Wish Vault"
+    ],
+    "landmarks": [
+      {
+        "id": "moonflower_tree",
+        "name": "Moonflower Tree",
+        "role": "focal"
+      },
+      {
+        "id": "ribbon_arch",
+        "name": "Ribbon Arch",
+        "role": "focal"
+      },
+      {
+        "id": "giant_teacup_pavilion",
+        "name": "Giant Teacup Pavilion",
+        "role": "focal"
+      },
+      {
+        "id": "wish_fountain",
+        "name": "Wish Fountain",
+        "role": "focal"
+      },
+      {
+        "id": "storybook_castle_facade",
+        "name": "Storybook Castle Facade",
+        "role": "focal"
+      },
+      {
+        "id": "wish_offering",
+        "name": "Wish Offering",
+        "role": "interactive"
+      },
+      {
+        "id": "petal_alignment",
+        "name": "Petal Alignment",
+        "role": "interactive"
+      },
+      {
+        "id": "story_sequence_pedestal",
+        "name": "Story Sequence Pedestal",
+        "role": "interactive"
+      },
+      {
+        "id": "moonlight_trial",
+        "name": "Moonlight Trial",
+        "role": "interactive"
+      },
+      {
+        "id": "tea_garden_station",
+        "name": "Tea Garden Station",
+        "role": "interactive"
+      },
+      {
+        "id": "dollhouse_cache",
+        "name": "Dollhouse Cache",
+        "role": "discovery"
+      },
+      {
+        "id": "hidden_blossom_nest",
+        "name": "Hidden Blossom Nest",
+        "role": "discovery"
+      },
+      {
+        "id": "sealed_story_chest",
+        "name": "Sealed Story Chest",
+        "role": "discovery"
+      },
+      {
+        "id": "starlit_alcove",
+        "name": "Starlit Alcove",
+        "role": "discovery"
+      },
+      {
+        "id": "traveling_storyteller_s_camp",
+        "name": "Traveling Storyteller's Camp",
+        "role": "discovery"
+      }
+    ],
+    "arena": "Moonlit Promise Sanctum",
+    "playable": false
+  }
+]

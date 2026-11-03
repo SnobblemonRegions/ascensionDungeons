@@ -1,0 +1,102 @@
+[
+ {
+  "name": "01_entry_north",
+  "pos": [
+   88.5,
+   6.6,
+   150.5
+  ],
+  "yaw": 0.0,
+  "pitch": 3.0
+ },
+ {
+  "name": "02_pond_from_south",
+  "pos": [
+   88.5,
+   6.6,
+   120.5
+  ],
+  "yaw": 0.0,
+  "pitch": 8.0
+ },
+ {
+  "name": "03_heartwood_close",
+  "pos": [
+   88.5,
+   6.6,
+   108.5
+  ],
+  "yaw": 0.0,
+  "pitch": 24.0
+ },
+ {
+  "name": "04_heartwood_north",
+  "pos": [
+   88.5,
+   6.6,
+   64.5
+  ],
+  "yaw": 180.0,
+  "pitch": 10.0
+ },
+ {
+  "name": "05_shrine_front",
+  "pos": [
+   128.5,
+   6.6,
+   71.5
+  ],
+  "yaw": 0.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "06_arena_door",
+  "pos": [
+   78.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 300.0,
+  "pitch": 5.0
+ },
+ {
+  "name": "07_arena_inside",
+  "pos": [
+   58.5,
+   6.6,
+   75.5
+  ],
+  "yaw": 270.0,
+  "pitch": 10.0
+ },
+ {
+  "name": "08_koi_garden",
+  "pos": [
+   63.5,
+   6.6,
+   134.5
+  ],
+  "yaw": 200.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "09_east_torii",
+  "pos": [
+   122.5,
+   6.6,
+   88.5
+  ],
+  "yaw": 90.0,
+  "pitch": 6.0
+ },
+ {
+  "name": "10_ceiling",
+  "pos": [
+   88.5,
+   6.6,
+   50.5
+  ],
+  "yaw": 180.0,
+  "pitch": 30.0
+ }
+]
