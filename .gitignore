@@ -1,6 +1,6 @@
 .gradle/
 build/
-run/
+/run/
 
 # Local-only artifacts
 backups/
