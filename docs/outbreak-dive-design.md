@@ -3,6 +3,10 @@
 Status: **design plus a tested pure core, nothing wired in, nothing seen in a live run.** Every number is provisional.
 Decisions (owner, 2026-11-15): loss is **haul-only**; the timed escalation is called the **Outbreak**; the first dungeon is **water**
 (Cinderforge is outdated and is not part of this).
+Later the same day: **Lootr is required** for Outbreak dives (no plain-chest fallback); a failed exit **strips tagged loot** from the
+inventory, armour, offhand and party held items, and anything already consumed or converted is the player's to keep; loot chests get
+**our own models, one design per rarity**; dungeon mobs are **enemy Cobblemon** with spells and aggro styles, and the dungeon's type
+decides the spawn pool.
 
 ## Why
 
@@ -108,3 +112,80 @@ Consequences to design around:
 - **Without Lootr** the dungeon places plain shared chests and this hook does not exist. Either require Lootr for Outbreak dives or add a
   second tagging point (to be checked against Fabric API 0.116.6: whether a loot-drops event exists there).
 - Mob drops and Pokémon captures are not chest loot and are untouched by this.
+
+## Loot chest skins: our own models, one design per rarity (owner direction 2026-11-15, nothing built)
+
+Loot chests inside a dungeon should not look like plain chests. Each rarity gets its own model, so a player reads a chest's worth from
+across the room, and the special chests are recognisable at a glance.
+
+| Chest | Reads as | Notes |
+|---|---|---|
+| Common, Uncommon, Rare, Epic | the four loot tiers that already exist (`loot_table/tiers/common` .. `epic`) | Colour them from AscensionLib's `design/rarity-colors.json` (slate, cyan, blue, violet) so rarity means the same colour everywhere. Legendary gold and Mythic crimson are there if higher tiers are added. |
+| Outbreak chest | loot that improves the longer the party stays | Should visibly change as it upgrades (more glow, a higher-rarity trim). |
+| Timer chest | locked until a stage or time is reached | Needs a locked and an unlocked look. |
+| Strongbox | high value, opening it summons a wave | Should look dangerous. |
+
+Rules the art must respect:
+- **No client mod of ours.** Players join with Cobblemon (and the pack's other client mods); this mod stays server-side. The models ship in a
+  resource pack. Towers and Raids already build and auto-host one through Polymer, and AscensionLib has a hand-made `resourcepack/`.
+- **Works without the pack.** A player who declines it must still see a usable chest (the plain one), as Towers does for armour.
+- Models are original work (Blockbench or similar); nothing copied from Runebind or other servers.
+
+How it could be drawn (decide before any art is commissioned):
+
+| Option | How | Cost and risk |
+|---|---|---|
+| **A. Display entity over the chest (recommended to try first)** | Keep the Lootr chest as the real container; show an `item_display` with a custom model per rarity on top of it, and hide or shrink the chest's own look. | Server-side only. Needs a pack entry per model. Lid animation and the per-player "already opened" look are extra work. Polymer's virtual entities would make it per-player; that is a **new dependency for this mod** and needs approval. |
+| B. Lootr's own texture types | Lootr has client texture types and pluggable `ILootrType`s. | Needs code on the client, which this mod does not have. Only if the client pack is allowed to grow. |
+| C. A Polymer block per rarity | Real custom blocks, mapped by Polymer. | Largest change: the chest stops being a Lootr chest, so per-player loot and the tagging filter would need redoing. |
+
+Open: (1) who makes the models, and how many states each needs; (2) whether Polymer may be added here; (3) **is Lootr in the players'
+client pack?** Lootr registers its own blocks, so a client without it may not be able to join a server that has it. This affects the
+"Lootr is required" decision and must be confirmed against the real modpack before relying on it.
+
+## Enemy Cobblemon: dungeon mobs with spells and aggro styles (owner direction 2026-11-15)
+
+Dungeon mobs are hostile Cobblemon, not vanilla monsters. Each type dungeon draws them from its own pool, so the water dungeon is fought
+against Water-type Pokémon and plays differently from the others.
+
+Already there (built before this doc; described in the code as untested with real players):
+- **Type decides the pool.** Every authored `layout.json` has `pokemon.pools`. Water: `wild_low` (psyduck, wooper, poliwag, lotad, tympole,
+  buizel, slowpoke), `wild_mid` (golduck, quagsire, poliwhirl, lombre, floatzel, palpitoad, slowbro), `trial` (wartortle .. seaking) and
+  `boss` (swampert, empoleon, gyarados, kingdra), with a base tier and per-player level scaling.
+- **Encounters already name a pool.** Each spawn lists a vanilla mob and a `pokemon` pool; with Cobblemon installed and `authoredPokemon`
+  on, the Pokémon is used instead.
+- **Real-time combat** (`AuthoredCombat`, behind `authoredCombat`): dungeon Pokémon hunt players and their sent-out Pokémon, use their
+  moves on cooldowns with type effectiveness, drain and recovery moves, statuses (`RealtimeStatus`) and affixes (`AffixFx`). A player's
+  Pokémon never dies: it faints, is recalled and healed, and cannot be sent out again for a cooldown.
+
+What this direction adds:
+
+1. **Vanilla mobs go away.** Pokémon mode becomes the only mode for Outbreak dives; the vanilla entry in each spawn is only a fallback for
+   a server without Cobblemon. Bosses (the Tide Warden is a vanilla drowned today) become boss Pokémon from the `boss` pool.
+2. **Spells.** A spell is a telegraphed, dodgeable attack on top of a Pokémon's ordinary moves: a warning shape on the ground, then the
+   hit. Examples for water: a line of rising water (Surf), a whirlpool that pulls players in (Whirlpool), a bubble that slows (Bubble Beam).
+   Declared per pool or per species in `layout.json`, reusing the hazard shapes the engine already has (`zone`, `jet`, `vent`, `gust`).
+   Naming: "ability" already means something in Pokémon and in AscensionLib's vocabulary, so call these **spells** in design and show them
+   to players under the move's own name.
+3. **Aggro styles.** Today every dungeon Pokémon behaves the same (one sight range, hunt the nearest). Give each pool entry a style:
+
+   | Style | Behaviour |
+   |---|---|
+   | Hunter | chases the nearest target across the room |
+   | Sentry | holds a spot, attacks only what comes close |
+   | Ambusher | hidden or still until a player passes, then strikes |
+   | Skirmisher | keeps its distance and casts |
+   | Pack | weak alone, calls nearby pack members when one is hit |
+   | Guardian | protects a chest, altar or the portal; never leaves it |
+
+4. **The Outbreak drives it.** Higher stages raise spawn pressure (`spawnScale`), promote pools (`wild_low` to `wild_mid`) and make
+   **elites**: an enemy with an extra spell, a tougher aggro style and more health. A strongbox wave and the extraction portal draw from
+   the same pools.
+
+Logic goes where tests reach it: which style a spawn gets, when it changes target, when a spell fires and what it hits should be decided
+by Minecraft-free classes (like `OutbreakClock`), with `AuthoredCombat` only carrying the decision out.
+
+Open: (1) **Can enemy Cobblemon be caught or battled the normal way?** The AscensionLib contract rates wild captures inside a dungeon
+zone, while Towers' opponents are never catchable. Suggested: enemies are hostile and not catchable; a separate, calmer `wild` pool stays
+catchable. (2) Friendly fire and whether a player with no Pokémon out can fight. (3) Performance: how many real-time Pokémon a run level
+can hold at Outbreak stage 5 with four players. (4) Balance against AscensionLib's Threat bands, which were designed for turn-based fights.
