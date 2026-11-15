@@ -62,9 +62,8 @@ Proposed, not yet checked against play:
 
 ## Open questions and spikes (do these before wiring)
 
-1. **Chest loot is physical.** Lootr hands items straight to the player, so haul-only loss needs a way to tag or intercept it. Spike against
-   the decompiled Lootr jar; fallbacks: tag items with run `custom_data` and strip unbanked ones on a failed exit, or credit chests as
-   wallet value instead of items.
+1. **Chest loot is physical: spiked 2026-11-15, the tagging half works.** See "Lootr spike" below. Still open: stripping unbanked
+   items on a failed exit, clearing the tag on bank or extraction, the no-Lootr fallback, and the smuggling routes listed there.
 2. **Mid-run tier change.** The contract says `openZone` can change a zone's tier; confirm in a live run that wild ratings follow, and that
    rarity stops improving at tier 4 (so spawn pressure, not rarity, carries stages 4 and up).
 3. **Per-player arena wins.** If banked wins differ per player, `settleDungeonRun` needs one call per distinct value, or a new method that
@@ -80,3 +79,32 @@ Proposed, not yet checked against play:
 3. Wire one dungeon: `OutbreakClock` + announcements in `AuthoredDirector`, then `Haul` at the existing settlement point, then the portal.
 4. A bot test (the headless pattern from the earlier session) for enter, outbreak stages, extraction and a failed exit.
 5. A real-client playtest, which nothing here replaces.
+
+## Lootr spike (2026-11-15): run loot can be tagged at the source
+
+**Result: proven on a live dev server.** A bot player opened two Lootr chests placed with `/dungeon chest`. The one in the overworld gave
+8 untagged items. The one inside a `water` run gave 7 items, every one carrying `custom_data {ascension_run: "<run id>"}`, and the server
+logged `[run-loot] tagged 7 stack(s) for RunBot in run <id>`. Run without Cobblemon (the bot library cannot parse its packets), with the
+vanilla `simple_dungeon` table, so the dungeon's own tables and a real client are still untested.
+
+How it works (read from Lootr 1.11.38.127 with `javap`, signatures and bytecode, not decompiled source):
+- `ILootrFilter.mutate(ObjectArrayList<ItemStack>, LootFiller.LootFillerState, LootContext, RandomSource)` is called for every registered
+  filter from Lootr's `MixinLootTable`, injected into `LootTable.fill` just before `shuffleAndSplitItems`. Returning `true` stops later filters.
+- It runs for **every** `fill`, and the state is null unless Lootr is doing a per-player roll, so the filter must null-check.
+- The state gives `player()` and `provider().getInfoDimension()` / `getInfoPos()`: enough to find the run.
+- Filters are discovered with `ServiceLoader` (`LootrServiceRegistry`), so registration is a
+  `META-INF/services/noobanidus.mods.lootr.common.api.filter.ILootrFilterProvider` file. The class is only loaded when Lootr is, so Lootr stays optional.
+
+Built (off unless `-Dascensiondungeons.runLootTag=true`, because nothing clears the tag yet):
+- `mc/RunLoot`: `tag`, `runOf(stack)`, `clear`, and a dimension-to-run lookup set while the server runs.
+- `mc/lootr/RunLootFilters`: the filter, with a fault barrier so a bug can never break chest loot.
+- `FantasyRunHost.runOfDimension`.
+
+Consequences to design around:
+- A tagged stack does not merge with an untagged one, or with one from another run. Banking and extraction must `clear` the tag.
+- **Smuggling routes** a strip-on-failure must cover or accept: a tagged item held by a Pokémon, inside a bundle or shulker box, dropped
+  for a teammate who extracts, crafted or smelted into something untagged, or eaten/used. Simplest rule: a failed exit removes tagged
+  stacks from the inventory, armour, offhand and party held items; anything consumed or converted is the player's to keep.
+- **Without Lootr** the dungeon places plain shared chests and this hook does not exist. Either require Lootr for Outbreak dives or add a
+  second tagging point (to be checked against Fabric API 0.116.6: whether a loot-drops event exists there).
+- Mob drops and Pokémon captures are not chest loot and are untouched by this.

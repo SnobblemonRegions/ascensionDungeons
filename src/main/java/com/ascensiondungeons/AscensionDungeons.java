@@ -58,6 +58,7 @@ public final class AscensionDungeons implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             FantasyRunHost host = new FantasyRunHost(server, cfg);
             manager = new RunManager(host, cfg, () -> ThreadLocalRandom.current().nextLong());
+            com.ascensiondungeons.mc.RunLoot.runOfDimension = host::runOfDimension;
             java.util.List<com.ascensiondungeons.mc.ArenaDirector> systems = new java.util.ArrayList<>();
             // The Cinderforge mechanics use only vanilla content, so they run whether or not Cobblemon is installed.
             com.ascensiondungeons.mc.CinderforgeDirector cinder = new com.ascensiondungeons.mc.CinderforgeDirector(server, () -> manager, host);
@@ -111,6 +112,7 @@ public final class AscensionDungeons implements ModInitializer {
             cinderforge = null;
             authored = null;
             com.ascensiondungeons.mc.AuthoredDirector.current = null;
+            com.ascensiondungeons.mc.RunLoot.runOfDimension = null;
             arenas = java.util.List.of();
         });
     }
