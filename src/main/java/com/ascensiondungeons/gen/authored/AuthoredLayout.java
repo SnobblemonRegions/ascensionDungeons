@@ -69,10 +69,12 @@ public final class AuthoredLayout {
     private final Data data;
     private final Set<Integer> lights = new HashSet<>();
     private final Map<Integer, String> sealBlocks = new HashMap<>();
+    private final JsonObject outbreak;
 
-    private AuthoredLayout(SpongeSchematic schem, Data data) {
+    private AuthoredLayout(SpongeSchematic schem, Data data, JsonObject outbreak) {
         this.schem = schem;
         this.data = data;
+        this.outbreak = outbreak;
         for (int[] l : data.lights) lights.add(key(l[0], l[1], l[2]));
         for (Seal s : data.seals)
             for (int x = s.min[0]; x <= s.max[0]; x++)
@@ -94,7 +96,11 @@ public final class AuthoredLayout {
             SpongeSchematic schem = SpongeSchematic.read(s);
             Data data = new Gson().fromJson(new InputStreamReader(j, StandardCharsets.UTF_8), Data.class);
             if (data == null || data.version != 2 || !id.equals(data.id)) throw new IllegalStateException("Bad layout for dungeon " + id);
-            return new AuthoredLayout(schem, data);
+            JsonObject outbreak = null;
+            try (InputStream o = AuthoredLayout.class.getResourceAsStream(base + "outbreak.json")) {
+                if (o != null) outbreak = new Gson().fromJson(new InputStreamReader(o, StandardCharsets.UTF_8), JsonObject.class);
+            }
+            return new AuthoredLayout(schem, data, outbreak);
         } catch (IOException e) {
             throw new IllegalStateException("Cannot load dungeon " + id, e);
         }
@@ -113,6 +119,82 @@ public final class AuthoredLayout {
     public boolean isLight(int x, int y, int z) { return lights.contains(key(x, y, z)); }
     /** The sealed block at this cell (placed at generation instead of the schematic's), or null. */
     public String sealAt(int x, int y, int z) { return sealBlocks.get(key(x, y, z)); }
+
+    /** This dungeon's Outbreak dive settings ({@code outbreak.json} beside the layout), or null when it is an ordinary dungeon. */
+    public JsonObject outbreak() { return outbreak; }
+
+    /** The room the party enters in, or null. */
+    public Room entryRoom() { return roomAt(data.entry[0], data.entry[1], data.entry[2]); }
+
+    private boolean air(int x, int y, int z) {
+        if (x < 0 || y < 0 || z < 0 || x >= schem.width() || y >= schem.height() || z >= schem.length()) return false;
+        String state = stateAt(x, y, z);
+        return state.equals("minecraft:air") || state.equals("minecraft:cave_air");
+    }
+
+    /** A standing cell with open floor on all four sides, so something placed on it can always be walked around. */
+    private boolean open(int[] c) {
+        int[][] around = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int[] d : around) {
+            int x = c[0] + d[0], z = c[2] + d[1];
+            if (!air(x, c[1], z) || !air(x, c[1] + 1, z) || air(x, c[1] - 1, z)) return false;
+        }
+        return true;
+    }
+
+    /** Boxes and points a feature must keep clear of: hazards, trial plates, levers, locks, authored chests and the boss's room. */
+    private boolean reserved(int[] c, java.util.List<Box> boxes, java.util.List<int[]> points) {
+        for (Box b : boxes) if (b.contains(c[0], c[1], c[2])) return true;
+        for (int[] p : points) {
+            int dx = p[0] - c[0], dy = p[1] - c[1], dz = p[2] - c[2];
+            if (dx * dx + dy * dy + dz * dz < 9) return true;
+        }
+        return false;
+    }
+
+    private static void collect(JsonElement e, java.util.List<Box> boxes, java.util.List<int[]> points) {
+        if (e == null) return;
+        if (e.isJsonArray()) {
+            JsonArray a = e.getAsJsonArray();
+            if (a.size() == 3 && a.get(0).isJsonPrimitive() && a.get(0).getAsJsonPrimitive().isNumber()) { points.add(Jx.ints(a)); return; }
+            for (JsonElement x : a) collect(x, boxes, points);
+        } else if (e.isJsonObject()) {
+            Box b = Box.of(e);
+            if (b != null) { boxes.add(b); return; }
+            for (Map.Entry<String, JsonElement> x : e.getAsJsonObject().entrySet()) collect(x.getValue(), boxes, points);
+        }
+    }
+
+    private final Map<Long, java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Placement>> featureCache = new HashMap<>();
+
+    /**
+     * Where this run's Outbreak features go, from its seed: empty when the dungeon has no {@code outbreak.json}. The chunk
+     * generator places the blocks and the dive runs them, and both call this, so it must stay a pure function of the seed.
+     */
+    public synchronized java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Placement> features(long seed) {
+        if (outbreak == null) return java.util.List.of();
+        return featureCache.computeIfAbsent(seed, k -> {
+            java.util.List<Box> boxes = new java.util.ArrayList<>();
+            java.util.List<int[]> points = new java.util.ArrayList<>();
+            collect(data.hazards, boxes, points);
+            collect(data.mechanics, boxes, points);
+            collect(data.pads, boxes, points);
+            for (Chest c : data.chests) points.add(c.pos);
+            Set<String> bossRooms = new HashSet<>();
+            for (JsonElement b : data.bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));
+            java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Room> rooms = new java.util.ArrayList<>();
+            for (Room r : data.rooms) {
+                java.util.List<int[]> cells = new java.util.ArrayList<>();
+                if (!bossRooms.contains(r.id)) for (int[] c : r.spawnCells) if (open(c) && !reserved(c, boxes, points)) cells.add(c);
+                rooms.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Room(r.id, cells));
+            }
+            JsonObject f = Jx.o(outbreak, "features");
+            var counts = new com.ascensiondungeons.outbreak.FeaturePlanner.Counts(Jx.i(f, "chests", 4), Jx.i(f, "outbreakChests", 1),
+                    Jx.i(f, "timerChests", 1), Jx.i(f, "strongboxes", 1), Jx.i(f, "altars", 1));
+            Room home = entryRoom();
+            return java.util.List.copyOf(com.ascensiondungeons.outbreak.FeaturePlanner.plan(rooms, data.entry, home == null ? "" : home.id, counts, seed));
+        });
+    }
 
     public Room room(String id) {
         for (Room r : data.rooms) if (r.id.equals(id)) return r;

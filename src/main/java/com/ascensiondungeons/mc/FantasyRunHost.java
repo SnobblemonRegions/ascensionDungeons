@@ -95,12 +95,6 @@ public final class FantasyRunHost implements RunHost {
         return rl == null || rl.grid == null ? java.util.Optional.empty() : java.util.Optional.of(new LevelView(rl.level, rl.grid));
     }
 
-    /** The run whose level this dimension is, or null. */
-    public UUID runOfDimension(ResourceKey<Level> dimension) {
-        for (Map.Entry<UUID, RunLevel> e : levels.entrySet()) if (e.getValue().level.dimension().equals(dimension)) return e.getKey();
-        return null;
-    }
-
     public FantasyRunHost(MinecraftServer server, RunConfig cfg) {
         this.server = server;
         this.cfg = cfg;

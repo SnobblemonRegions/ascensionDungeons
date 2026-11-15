@@ -56,6 +56,11 @@ public final class AuthoredCombat implements AuthoredBridges.Combat {
     private static final Set<String> RECOVERY = Set.of("recover", "roost", "softboiled", "slackoff", "milkdrink", "moonlight", "morningsun", "synthesis", "shoreup", "healorder", "wish");
     private static final Set<String> DRAIN = Set.of("absorb", "megadrain", "gigadrain", "drainpunch", "leechlife", "hornleech", "drainingkiss", "oblivionwing", "paraboliclcharge", "bitterblade", "matchagotcha", "dreameater");
 
+    private volatile AuthoredBridges.Targeting targeting;
+
+    @Override
+    public void targeting(AuthoredBridges.Targeting targeting) { this.targeting = targeting; }
+
     @Override
     public void empower(Mob creature, double damageMultiplier) { empowered.put(creature.getUUID(), damageMultiplier); }
 
@@ -155,14 +160,23 @@ public final class AuthoredCombat implements AuthoredBridges.Combat {
         for (Mob h : hostiles) {
             if (!h.isAlive() || h.level() != level) continue;
             LivingEntity target = null; double best = SIGHT * SIGHT;
+            java.util.List<LivingEntity> inSight = new java.util.ArrayList<>();
             for (ServerPlayer pl : players) {
                 double d = h.distanceToSqr(pl);
+                if (d < SIGHT * SIGHT) inSight.add(pl);
                 if (d < best) { best = d; target = pl; }
             }
             for (PokemonEntity ally : allies) {
                 if (downedUntil.containsKey(ally.getPokemon().getUuid()) || ally.isBattling()) continue;
                 double d = h.distanceToSqr(ally);
+                if (d < SIGHT * SIGHT) inSight.add(ally);
                 if (d < best) { best = d; target = ally; }
+            }
+            // The dungeon may overrule the nearest target (aggro styles); a fault there must not stop the fight.
+            AuthoredBridges.Targeting chooser = targeting;
+            if (chooser != null) {
+                try { target = chooser.choose(h, inSight, target); }
+                catch (RuntimeException e) { com.ascensiondungeons.AscensionDungeonsLog.LOG.error("Targeting failed; using the nearest target", e); }
             }
             if (h instanceof PokemonEntity hp) prepare(hp, level);
             if (target == null) continue;

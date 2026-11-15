@@ -58,7 +58,6 @@ public final class AscensionDungeons implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             FantasyRunHost host = new FantasyRunHost(server, cfg);
             manager = new RunManager(host, cfg, () -> ThreadLocalRandom.current().nextLong());
-            com.ascensiondungeons.mc.RunLoot.runOfDimension = host::runOfDimension;
             java.util.List<com.ascensiondungeons.mc.ArenaDirector> systems = new java.util.ArrayList<>();
             // The Cinderforge mechanics use only vanilla content, so they run whether or not Cobblemon is installed.
             com.ascensiondungeons.mc.CinderforgeDirector cinder = new com.ascensiondungeons.mc.CinderforgeDirector(server, () -> manager, host);
@@ -67,6 +66,8 @@ public final class AscensionDungeons implements ModInitializer {
             com.ascensiondungeons.mc.AuthoredDirector auth = new com.ascensiondungeons.mc.AuthoredDirector(server, () -> manager, host);
             authored = auth;
             systems.add(auth);
+            com.ascensiondungeons.mc.RunLoot.runOfDimension = auth::diveRunOf;
+            com.ascensiondungeons.mc.RunLoot.chestListener = auth::chestLooted;
             com.ascensiondungeons.mc.AuthoredBridges.PokemonSpawner pk = FabricLoader.getInstance().isModLoaded("cobblemon") ? newPokemonSpawner() : null;
             com.ascensiondungeons.mc.AuthoredBridges.RaidBridge rb = FabricLoader.getInstance().isModLoaded("cobbleraids") ? newRaidBridge(cfg) : null;
             com.ascensiondungeons.mc.AuthoredBridges.Ascension asc = FabricLoader.getInstance().isModLoaded("ascensionlib") ? com.ascensiondungeons.mc.AscensionBridge.tryCreate() : null;
@@ -113,6 +114,7 @@ public final class AscensionDungeons implements ModInitializer {
             authored = null;
             com.ascensiondungeons.mc.AuthoredDirector.current = null;
             com.ascensiondungeons.mc.RunLoot.runOfDimension = null;
+            com.ascensiondungeons.mc.RunLoot.chestListener = null;
             arenas = java.util.List.of();
         });
     }

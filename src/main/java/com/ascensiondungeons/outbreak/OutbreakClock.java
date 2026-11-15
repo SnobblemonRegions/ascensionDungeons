@@ -65,6 +65,13 @@ public final class OutbreakClock {
         return (int) Math.min(params.maxStage(), stage);
     }
 
+    /** How far through the current stage the clock is, 0..1; 1 once the last stage is reached. */
+    public double progress(long now) {
+        if (stage(now) >= params.maxStage()) return 1.0;
+        long effective = Math.max(0, now - startTick) + penaltyTicks;
+        return (effective % params.ticksPerStage()) / (double) params.ticksPerStage();
+    }
+
     /** The new stage if it rose since the last call, otherwise -1. Skipped stages are reported as the latest one. */
     public int pollNewStage(long now) {
         int stage = stage(now);

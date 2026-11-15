@@ -83,6 +83,23 @@ public final class DungeonCommands {
                     m.runs().forEach(r -> reply(ctx, r.id() + " " + describe(r, m.now())));
                     return 1;
                 }))
+                .then(Commands.literal("dive").requires(s -> s.hasPermission(2)).executes(ctx -> {
+                    // Operator aid: the Outbreak dive of the run level the operator stands in, and where its features are.
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    AuthoredDirector director = AuthoredDirector.current;
+                    AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                    if (s == null || s.dive() == null) { ctx.getSource().sendFailure(Component.literal("You are not inside an Outbreak dive.")); return 0; }
+                    reply(ctx, s.dive().describe());
+                    for (String line : s.dive().featureLines()) reply(ctx, "feature " + line);
+                    return 1;
+                }).then(Commands.literal("bank").executes(ctx -> {
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    AuthoredDirector director = AuthoredDirector.current;
+                    AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                    if (s == null || s.dive() == null) { ctx.getSource().sendFailure(Component.literal("You are not inside an Outbreak dive.")); return 0; }
+                    s.dive().operatorCheckpoint();
+                    return 1;
+                })))
                 .then(Commands.literal("chest").requires(s -> s.hasPermission(2)).executes(ctx -> {
                     ServerPlayer p = ctx.getSource().getPlayerOrException();
                     var id = net.minecraft.resources.ResourceLocation.parse("lootr:lootr_chest");

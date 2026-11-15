@@ -29,12 +29,14 @@ public final class RunLootFilters implements ILootrFilterProvider {
         @Override
         public boolean mutate(ObjectArrayList<ItemStack> stacks, LootFiller.LootFillerState state, LootContext context, RandomSource random) {
             try {
-                if (!RunLoot.ENABLED || state == null || state.provider() == null) return false;
+                if (state == null || state.provider() == null) return false;
                 UUID run = RunLoot.runOf(state.provider().getInfoDimension());
                 if (run == null) return false;
                 for (ItemStack stack : stacks) RunLoot.tag(stack, run);
-                AscensionDungeonsLog.LOG.info("[run-loot] tagged {} stack(s) for {} in run {} at {}", stacks.size(),
+                AscensionDungeonsLog.LOG.info("[run-loot] tagged {} stack(s) from {} for {} in run {} at {}", stacks.size(), state.lootTableKey() == null ? "?" : state.lootTableKey().location(),
                         state.player() == null ? "?" : state.player().getGameProfile().getName(), run, state.provider().getInfoPos());
+                RunLoot.ChestListener listener = RunLoot.chestListener;
+                if (listener != null && state.player() instanceof net.minecraft.server.level.ServerPlayer sp) listener.looted(run, sp, state.provider().getInfoPos());
             } catch (RuntimeException e) {
                 // A fault here must never break chest loot.
                 AscensionDungeonsLog.LOG.error("[run-loot] filter failed; loot left untagged", e);

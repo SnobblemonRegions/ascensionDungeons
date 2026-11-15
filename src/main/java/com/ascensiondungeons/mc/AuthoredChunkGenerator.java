@@ -159,6 +159,27 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
             String table = c.table != null ? c.table : layout.data().lootTable;
             RandomizableContainer.setBlockEntityLootTable(level, level.getRandom(), pos, ResourceKey.create(Registries.LOOT_TABLE, ResourceLocation.parse(table)));
         }
+        // Outbreak features for this run's seed: the blocks go in here, the dive runs them (OutbreakDive).
+        for (var f : layout.features(seed)) {
+            BlockPos pos = toWorld(f.cell());
+            if (pos.getX() < x0 || pos.getX() >= x0 + 16 || pos.getZ() < z0 || pos.getZ() >= z0 + 16) continue;
+            switch (f.kind()) {
+                case PORTAL -> level.setBlock(pos.below(), state("minecraft:lodestone"), 2);
+                case ALTAR -> level.setBlock(pos, state("minecraft:crying_obsidian"), 2);
+                default -> {
+                    // The floor under a chest shows its rarity even without a resource pack.
+                    String floor = switch (f.kind()) {
+                        case STRONGBOX -> "minecraft:netherite_block";
+                        case TIMER_CHEST -> "minecraft:gold_block";
+                        default -> f.rarity().floorBlock();
+                    };
+                    level.setBlock(pos.below(), state(floor), 2);
+                    level.setBlock(pos, lootr.map(b -> b.defaultBlockState()).orElse(Blocks.CHEST.defaultBlockState()), 2);
+                    RandomizableContainer.setBlockEntityLootTable(level, level.getRandom(), pos,
+                            ResourceKey.create(Registries.LOOT_TABLE, ResourceLocation.parse(f.rarity().lootTable())));
+                }
+            }
+        }
     }
 
     public static BlockState state(String name) {

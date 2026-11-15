@@ -27,6 +27,9 @@ public final class AuthoredBridges {
         /** Called every few ticks with the dungeon's hostile creatures. */
         void tick(ServerLevel level, long now, Collection<? extends Mob> hostiles);
 
+        /** Lets the dungeon decide which target a hostile takes; without one a hostile takes the nearest. */
+        void targeting(Targeting targeting);
+
         /** Makes a creature hit harder (bosses). */
         void empower(Mob creature, double damageMultiplier);
 
@@ -38,6 +41,12 @@ public final class AuthoredBridges {
 
         /** The run's level is going away: heal and forget everything about it. */
         void release(ServerLevel level);
+    }
+
+    /** Chooses a hostile's target from the candidates in sight. {@code nearest} is the default choice; null means stand down. */
+    @FunctionalInterface
+    public interface Targeting {
+        net.minecraft.world.entity.LivingEntity choose(Mob hostile, List<net.minecraft.world.entity.LivingEntity> candidates, net.minecraft.world.entity.LivingEntity nearest);
     }
 
     public enum RaidOutcome { VICTORY, DEFEAT, ABORTED }

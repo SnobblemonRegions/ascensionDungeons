@@ -70,6 +70,17 @@ class OutbreakClockTest {
     }
 
     @Test
+    void progressRunsFromZeroToOneWithinAStageAndStaysFullAtTheTop() {
+        OutbreakClock c = new OutbreakClock(p, 1000);
+        assertEquals(0.0, c.progress(1000), 1e-9);
+        assertEquals(0.5, c.progress(1050), 1e-9);
+        assertEquals(0.0, c.progress(1100), 1e-9);
+        c.addPenalty(25);
+        assertEquals(0.5, c.progress(1125), 1e-9, "a curse moves the bar too");
+        assertEquals(1.0, c.progress(99_999), 1e-9);
+    }
+
+    @Test
     void invalidParametersAreRejected() {
         assertThrows(IllegalArgumentException.class, () -> new OutbreakClock.Params(0, 5, 0.25, 0.04, 0.3, 2));
         assertThrows(IllegalArgumentException.class, () -> new OutbreakClock.Params(100, -1, 0.25, 0.04, 0.3, 2));
