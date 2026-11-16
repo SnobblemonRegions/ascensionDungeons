@@ -8,8 +8,12 @@ Terms shared with the sibling mods keep the sibling's meaning; see AscensionLib'
 **Run**: One party's visit to one dungeon, in its own level, from request to deletion. Owned by `RunManager`.
 _Avoid_: instance, session (a session is the mechanics state of one authored run).
 
-**Authored dungeon**: A hand-designed dungeon: a schematic plus a `layout.json` declaring rooms, mechanics, hazards, encounters and bosses. One per Pokémon type.
-_Avoid_: type dungeon when the district generator's "type pilot" is meant.
+**Authored dungeon**: A hand-designed dungeon: a schematic plus a `layout.json` declaring rooms, mechanics, hazards, encounters and bosses.
+
+**Type dungeon**: An authored dungeon named after a Pokémon type (`water`, `ghost`, ...). These are the current dungeons, and every one is an Outbreak dive. Seventeen exist; Fire does not yet.
+_Avoid_: using it for the district generator's "type pilot".
+
+**Outdated dungeon**: Any dungeon not named after a Pokémon type: Cinderforge, the Halloween graveyard, the biome districts and the type pilot. Left as they are; nothing new is built on them.
 
 **Mechanic**: A declared puzzle or gate in an authored dungeon: a lever sequence, a lock, a trial.
 
@@ -17,7 +21,7 @@ _Avoid_: type dungeon when the district generator's "type pilot" is meant.
 
 ## Outbreak dives
 
-**Outbreak dive**: An authored dungeon run with the push-or-extract loop: an Outbreak, a haul, checkpoints and an extraction portal. A dungeon is one when it has an `outbreak.json`.
+**Outbreak dive**: A type dungeon run with the push-or-extract loop: an Outbreak, a haul, checkpoints, the Depths and an extraction portal. A dungeon is one when it has an `outbreak.json`.
 _Avoid_: extraction mode, roguelike mode.
 
 **Outbreak**: How worked-up the dungeon has become, rising with time spent and with curses taken. It has a **stage** and never falls. Named for Pokémon's Mass Outbreak.
@@ -40,10 +44,23 @@ _Avoid_: loot (loot is items), rewards (rewards are what AscensionLib pays).
 **Checkpoint**: A moment that banks everyone's haul: a named mechanic finished, or the boss defeated.
 _Avoid_: save point, respawn point.
 
-**Extraction**: Leaving through the portal, keeping the whole haul.
+**Extraction**: Leaving through the portal. It always costs something: beat the gatekeeper and keep everything, or pay the toll.
 _Avoid_: escape, cash out (Towers' word for its own vote).
 
-**Extraction portal**: The exit near the entrance. Kills near it charge it; full, it opens for a short window; missed, it costs more.
+**Extraction portal**: The exit near the entrance, always there. Stepping on it opens the extraction window.
+
+**Extraction window**: The chest-style screen at the portal. It shows exactly the items the toll would take, and offers paying it, challenging the gatekeeper, or staying.
+
+**Toll**: The price of leaving without beating the gatekeeper: 35% of a player's unbanked loot (counted in items, by kind) and 35% of their unbanked wins. Loot hidden in a bundle, a box, the ender chest or on a Pokémon is forfeit in full.
+_Avoid_: tax, fee.
+
+**Gatekeeper**: The boss a player calls out at the portal, drawn from the dungeon's `boss` pool. It grows with the Outbreak stage and with every gatekeeper already beaten. When it falls the portal opens free for everyone for a short window.
+_Avoid_: boss (the dungeon's own final boss is "the boss"), guardian (a strongbox has guardians).
+
+**The Depths**: The procedural maze under a dive, different every run, built from the dungeon's own blocks. Most of a run's chests are there.
+_Avoid_: basement, lower level, procedural wing.
+
+**Stairway**: The spot beside the entrance that carries a player down to the Depths. The spot where they arrive carries them back up.
 
 **Knock-out**: What a lethal hit does in a dive: the player is healed, loses their unbanked haul and is sent home. Nobody dies in a dive.
 _Avoid_: death, wipe.
@@ -70,7 +87,7 @@ _Avoid_: ability (a Pokémon ability, and AscensionLib avoids it too), skill.
 
 ## Features
 
-**Feature**: Something a dive places for one run from its seed: a chest, an altar, the portal.
+**Feature**: Something a dive places for one run from its seed: a chest, an altar, the portal, the stairway.
 
 **Rarity chest**: A loot chest of a rarity: Common, Uncommon, Rare, Epic. Colours follow AscensionLib's rarity palette. Not an Ascension rarity of a Pokémon.
 

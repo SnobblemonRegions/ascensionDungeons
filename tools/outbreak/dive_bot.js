@@ -1,7 +1,8 @@
 // Live check of an Outbreak dive in the water dungeon, played by a mineflayer bot against a real dev server.
 //
 // It loots rarity chests, banks at a checkpoint, uses a curse altar, waits for a timer chest, opens an outbreak chest and a
-// strongbox, charges the portal and extracts; then it checks a knock-out, a walk-out and a disconnect.
+// strongbox, takes the stairway down to the Depths and back, reads the extraction screen and pays the 35% toll; then it checks a
+// knock-out, a walk-out, a disconnect, and beating the gatekeeper.
 //
 // How to run (the bot library cannot parse Cobblemon's packets, so the server runs without Cobblemon and the dungeon uses its
 // vanilla fallback mobs; Pokémon combat, aggro for Pokémon and AscensionLib payouts are NOT covered by this check):
@@ -9,7 +10,7 @@
 //   2. In build.gradle, temporarily change Cobblemon's `modImplementation` to `modCompileOnly` (do not commit that).
 //   3. run/server.properties: online-mode=false, enforce-secure-profile=false. run/ops.json: op "RunBot"
 //      (offline UUID 221e52a3-45e9-3caa-ab49-a8d5537a85c0, level 4). run/eula.txt: eula=true.
-//   4. JAVA_TOOL_OPTIONS="-Dascensiondungeons.outbreakSpeed=6" ./gradlew runServer -PcobbleRaidsJar=<CobbleRaids jar>
+//   4. JAVA_TOOL_OPTIONS="-Dascensiondungeons.outbreakSpeed=12" ./gradlew runServer -PcobbleRaidsJar=<CobbleRaids jar>
 //   5. node dive_bot.js   (prints PASS/FAIL lines and "N/N passed", then stops the server)
 const mineflayer = require('mineflayer');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -34,7 +35,8 @@ async function use(bot, x, y, z) {   // right-click a block, standing next to it
   const onOpen = () => { opened = true; };
   bot._client.once('open_window', onOpen);
   bot._client.write('block_place', { hand: 0, location: { x, y, z }, direction: 1, cursorX: 0.5, cursorY: 0.5, cursorZ: 0.5, insideBlock: false, sequence: seq++ });
-  await sleep(1800);
+  for (let i = 0; i < 16 && !opened; i++) await sleep(500);     // freshly generated ground can take a few seconds
+  await sleep(600);
   bot._client.removeListener('open_window', onOpen);
   if (opened) {
     try { const w = bot.currentWindow; if (w) { for (let s = 0; s < 27; s++) { try { await bot.clickWindow(s, 0, 1); } catch (e) {} } bot.closeWindow(w); } } catch (e) {}
@@ -42,7 +44,24 @@ async function use(bot, x, y, z) {   // right-click a block, standing next to it
   }
   return opened;
 }
-async function inv(bot) { const r = await cmd(bot, '/data get entity @s Inventory', 1200); return { tagged: (r.match(/ascension_run/g) || []).length, items: (r.match(/id: "/g) || []).length, raw: r }; }
+async function inv(bot) {
+  const r = await cmd(bot, '/data get entity @s Inventory', 1200);
+  const sum = re => [...r.matchAll(re)].reduce((n, m) => n + Number(m[1]), 0);
+  return { tagged: (r.match(/ascension_run/g) || []).length, items: (r.match(/id: "/g) || []).length, raw: r,
+           total: sum(/count: (\d+)/g), markedTotal: sum(/count: (\d+), Slot: \d+b, components: \{"minecraft:custom_data": \{ascension_run/g) };
+}
+// Step onto the portal and wait for the extraction window; returns {window, shown} or null.
+async function tollWindow(bot, portal) {
+  const opened = new Promise(resolve => { const t = setTimeout(() => resolve(null), 8000); bot.once('windowOpen', w => { clearTimeout(t); resolve(w); }); });
+  await cmd(bot, `/tp @s ${portal.x + 4} ${portal.y} ${portal.z}`, 600);   // step off first, so stepping on shows the screen
+  await cmd(bot, `/tp @s ${portal.x} ${portal.y} ${portal.z}`, 600);
+  const w = await opened;
+  if (!w) return null;
+  await sleep(600);
+  let shown = 0; const names = [];
+  for (let i = 0; i < 36; i++) { const it = w.slots[i]; if (it) { shown += it.count; names.push(it.count + 'x' + it.name); } }
+  return { window: w, shown, names, title: String(w.title && (w.title.value || w.title)).slice(0, 60), pay: w.slots[45] && w.slots[45].name, fight: w.slots[49] && w.slots[49].name };
+}
 async function startRun(bot) {
   await cmd(bot, '/clear', 600);
   const r = await cmd(bot, '/dungeon type water', 1000);
@@ -82,7 +101,7 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     await use(bot, altar.x, altar.y, altar.z);
     const after = await stageOf(bot);
     check('A curse altar surges the Outbreak', bot.log.slice(n).some(l => /altar's curse/.test(l)) && after > before, `stage ${before} -> ${after}`);
-    for (let i = 0; i < 90 && (await stageOf(bot)) < 2; i++) await sleep(1000);
+    for (let i = 0; i < 150 && (await stageOf(bot)) < 2; i++) await sleep(1000);
     check('A stage announcements were made', bot.log.some(l => /The Outbreak grows: stage/.test(l)), bot.log.filter(l => /Outbreak grows/.test(l)).length + ' announcement(s)');
     opened = await use(bot, timer.x, timer.y, timer.z);
     check('A timer chest unseals at stage 2', opened);
@@ -93,19 +112,42 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     const n2 = bot.log.length;
     opened = await use(bot, sb.x, sb.y, sb.z);
     check('A strongbox opens and wakes guardians', opened && bot.log.slice(n2).some(l => /strongbox wakes the dungeon/.test(l)));
+    // the Depths: down the stairway, loot a chest there, and back up
+    const descent = kinds('DESCENT')[0], back = kinds('RETURN')[0];
+    check('A the dive has a stairway and many more features than rooms above', !!descent && !!back && run.feats.length >= 30, run.feats.length + ' features');
+    let nb = bot.bars.length;
+    await cmd(bot, `/tp @s ${descent.x} ${descent.y} ${descent.z}`, 2500);
+    check('A the stairway carries the player down to the Depths', bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)) && bot.log.some(l => /The Depths: a maze/.test(l)), bot.bars.slice(-1)[0]);
+    // chests[0] and chests[1] were opened above; Lootr rolls a chest once per player, so take one not yet opened
+    const deep = chests.slice(2).filter(c => c.z > back.z - 14);
+    const before5 = await inv(bot);
+    opened = await use(bot, deep[0].x, deep[0].y, deep[0].z);
+    const after5 = await inv(bot);
+    // count items, not stacks: new loot of a kind already carried merges into the stack that is there
+    check('A a chest down in the Depths gives marked loot', opened && after5.markedTotal > before5.markedTotal, `${deep.length} unopened rarity chests are in the Depths`);
+    nb = bot.bars.length;
+    await cmd(bot, `/tp @s ${back.x} ${back.y} ${back.z}`, 2500);
+    check('A the way back up returns the player', bot.bars.slice(nb).some(b => /climb back/.test(b)), bot.bars.slice(-1)[0]);
+    // extraction: the screen shows exactly what the toll takes; pay it
     const portal = kinds('PORTAL')[0];
     const before4 = await inv(bot);
-    await cmd(bot, `/tp @s ${portal.x} ${portal.y} ${portal.z}`, 800);
+    const toll = await tollWindow(bot, portal);
+    const expected = Math.max(1, Math.round(before4.markedTotal * 0.35));
+    check('A the extraction screen shows exactly the 35% toll', !!toll && toll.shown === expected && toll.pay === 'red_concrete' && toll.fight === 'netherite_sword',
+      toll ? `${before4.markedTotal} unbanked item(s): shows ${toll.shown} [${toll.names.join(', ')}], expected ${expected}` : 'no window');
+    try { await bot.clickWindow(0, 0, 0); } catch (e) {}          // try to take a shown item: nothing may move
+    await sleep(800);
+    const still = await inv(bot);
+    check('A nothing can be taken out of the extraction screen', still.total === before4.total, `${before4.total} item(s) before, ${still.total} after the click`);
+    const toll2 = await tollWindow(bot, portal);
+    const n5 = bot.log.length;
+    try { await bot.clickWindow(45, 0, 0); } catch (e) {}
     let extracted = false;
-    for (let i = 0; i < 120 && !extracted; i++) {
-      for (const t of ['drowned', 'stray', 'zombie', 'skeleton']) bot.chat(`/kill @e[type=${t},distance=..22]`);
-      await sleep(1000);
-      extracted = bot.log.some(l => /Extracted! You keep everything/.test(l));
-    }
-    check('A portal charges from kills and extracts the player', extracted, bot.log.filter(l => /Extracted|portal is open/.test(l)).slice(-2).join(' | '));
-    await sleep(2500);
+    for (let i = 0; i < 20 && !extracted; i++) { await sleep(500); extracted = bot.log.slice(n5).some(l => /Extracted! You leave with/.test(l)); }
+    await sleep(2000);
     const i4 = await inv(bot);
-    check('A extraction keeps every item and clears the marks', i4.items === before4.items && i4.items > i3.items && i4.tagged === 0, `${before4.items} stacks before, ${i4.items} after, ${i4.tagged} marked`);
+    check('A paying the toll takes exactly what was shown and lets the player out', extracted && !!toll2 && i4.total === before4.total - toll2.shown && i4.tagged === 0,
+      `${before4.total} item(s) before, toll showed ${toll2 ? toll2.shown : '?'}, ${i4.total} after, ${i4.tagged} marked | ${bot.log.slice(n5).filter(l => /Toll paid/.test(l))[0] || ''}`);
     r = await cmd(bot, '/dungeon status');
     check('A the player is out of the run', /not in a dungeon run/.test(r), r);
 
@@ -148,6 +190,28 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     bot = await connect();
     const d2 = await inv(bot);
     check('D loot from a run left by disconnecting is swept at login', d1.tagged > 0 && d2.items === 0 && bot.log.some(l => /Unbanked loot/.test(l)), `${d1.items} stacks before, ${d2.items} after`);
+    // ---------------- E: beating the gatekeeper lets the player leave with everything
+    run = await startRun(bot);
+    const c5 = run.feats.filter(f => f.kind === 'CHEST');
+    await use(bot, c5[0].x, c5[0].y, c5[0].z);
+    const g1 = await inv(bot);
+    const portal5 = run.feats.filter(f => f.kind === 'PORTAL')[0];
+    const toll5 = await tollWindow(bot, portal5);
+    const n6 = bot.log.length;
+    try { await bot.clickWindow(49, 0, 0); } catch (e) {}
+    await sleep(2500);
+    check('E challenging calls out the gatekeeper', !!toll5 && bot.log.slice(n6).some(l => /calls out the gatekeeper/.test(l)), bot.log.slice(n6).slice(-1)[0]);
+    await cmd(bot, `/tp @s ${portal5.x} ${portal5.y} ${portal5.z}`, 600);
+    let won = false;
+    for (let i = 0; i < 40 && !won; i++) {
+      for (const t of ['drowned', 'stray', 'zombie', 'skeleton']) bot.chat(`/kill @e[type=${t},distance=..40]`);
+      await sleep(1000);
+      won = bot.log.slice(n6).some(l => /Extracted! You leave with/.test(l));
+    }
+    await sleep(2000);
+    const g2 = await inv(bot);
+    check('E the gatekeeper falls, the portal opens and the player keeps everything', won && bot.log.slice(n6).some(l => /gatekeeper has fallen/.test(l)) && g2.total === g1.total && g2.tagged === 0,
+      `${g1.total} item(s) before, ${g2.total} after, ${g2.tagged} marked`);
   } catch (e) { console.log('SCENARIO ERROR', e); results.push(false); }
   const failed = results.filter(x => !x).length;
   console.log(`\n${results.length - failed}/${results.length} passed`);
@@ -155,4 +219,4 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
   await sleep(2000);
   process.exit(failed ? 1 : 0);
 })();
-setTimeout(() => { console.log('TIMEOUT'); process.exit(2); }, 560000);
+setTimeout(() => { console.log('TIMEOUT'); process.exit(2); }, 575000);

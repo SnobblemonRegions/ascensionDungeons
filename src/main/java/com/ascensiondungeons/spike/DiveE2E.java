@@ -60,7 +60,11 @@ public final class DiveE2E {
             long t = server.getTickCount();
             if (t < 100) return;
             try {
-                if (steps.isEmpty()) script(server, manager);
+                if (steps.isEmpty()) {
+                    // DUNGEONSPIKE_DIVE=all plays a short dive in every type dungeon; any other value plays the long water script.
+                    if ("all".equalsIgnoreCase(System.getenv("DUNGEONSPIKE_DIVE"))) smoke(server, manager);
+                    else script(server, manager);
+                }
                 if (channel != null) channel.releaseOutbound();
                 if (bot != null && !bot.isRemoved() && bot.connection != null) {
                     // A real client confirms each dimension change; until then the server holds the player invulnerable.
@@ -160,16 +164,7 @@ public final class DiveE2E {
 
     private static void script(MinecraftServer server, Supplier<RunManager> manager) {
         boolean cobblemon = FabricLoader.getInstance().isModLoaded("cobblemon");
-        steps.add(new Step("stand-in player joins through the normal login path", 100, () -> {
-            if (bot == null) {
-                GameProfile profile = new GameProfile(ID, "DiveBot");
-                bot = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
-                Connection connection = new Connection(PacketFlow.SERVERBOUND);
-                channel = new EmbeddedChannel(connection);
-                server.getPlayerList().placeNewPlayer(connection, bot, CommonListenerCookie.createInitial(profile, false));
-            }
-            return server.getPlayerList().getPlayer(ID) == bot;
-        }));
+        join(server);
         addRun(manager, "run 1");
         steps.add(new Step("a wave spawns" + (cobblemon ? " and its enemies are uncatchable, unbattleable Pokémon from the water pools" : ""), 1200, () -> {
             List<Mob> mobs = dive().enemyMobs();
@@ -410,13 +405,104 @@ public final class DiveE2E {
         steps.add(new Step("the extracted player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
     }
 
-    private static void addRun(Supplier<RunManager> manager, String label) {
-        steps.add(new Step(label + ": a water run is accepted", 40, new BooleanSupplier() {
+    private static void addRun(Supplier<RunManager> manager, String label) { addRun(manager, label, "water"); }
+
+    private static void join(MinecraftServer server) {
+        steps.add(new Step("stand-in player joins through the normal login path", 100, () -> {
+            if (bot == null) {
+                GameProfile profile = new GameProfile(ID, "DiveBot");
+                bot = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
+                Connection connection = new Connection(PacketFlow.SERVERBOUND);
+                channel = new EmbeddedChannel(connection);
+                server.getPlayerList().placeNewPlayer(connection, bot, CommonListenerCookie.createInitial(profile, false));
+            }
+            return server.getPlayerList().getPlayer(ID) == bot;
+        }));
+    }
+
+    /** A short dive in every type dungeon: it starts, enemies come, the Depths exist and hold loot, and the toll lets the player out. */
+    private static void smoke(MinecraftServer server, Supplier<RunManager> manager) {
+        boolean cobblemon = FabricLoader.getInstance().isModLoaded("cobblemon");
+        join(server);
+        for (String type : com.ascensiondungeons.gen.authored.AuthoredDungeons.ids()) {
+            if (com.ascensiondungeons.gen.authored.AuthoredLayout.get(type).outbreak() == null) continue;
+            addRun(manager, type, type);
+            steps.add(new Step(type + ": a wave of " + (cobblemon ? "Pokémon " : "") + "enemies spawns", 1200, () -> {
+                bot.setInvulnerable(true);
+                List<Mob> mobs = dive().enemyMobs();
+                if (mobs.isEmpty()) return false;
+                List<String> names = new ArrayList<>();
+                boolean allPokemon = true;
+                for (Mob m : mobs) { names.add(m.getName().getString()); allPokemon &= m.getClass().getName().contains("PokemonEntity"); }
+                AscensionDungeonsLog.LOG.info("DIVE-E2E {} enemies: {}", type, names);
+                return !cobblemon || allPokemon;
+            }));
+            steps.add(new Step(type + ": the stairway leads down into Depths built from its own blocks", 200, new BooleanSupplier() {
+                boolean moved;
+                @Override public boolean getAsBoolean() {
+                    OutbreakDive d = dive();
+                    if (d.descentCentre() == null) throw new IllegalStateException("no stairway");
+                    if (!moved) { Vec3 p = d.descentCentre(); bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f); moved = true; return false; }
+                    if (bot.position().distanceToSqr(d.returnCentre()) > 4) return false;
+                    ServerLevel level = (ServerLevel) bot.level();
+                    AuthoredDirector.Session s = session();
+                    int[] sc = s.generator().toSchematic(bot.blockPosition());
+                    var room = s.layout().roomAt(s.run().seed(), sc[0], sc[1], sc[2]);
+                    String[] palette = s.layout().depthsPalette();
+                    java.util.Set<String> seen = new java.util.TreeSet<>();
+                    for (int dx = -12; dx <= 12; dx++) for (int dz = -12; dz <= 12; dz++) for (int dy = -1; dy <= 9; dy++) {
+                        var state = level.getBlockState(bot.blockPosition().offset(dx, dy, dz));
+                        if (!state.isAir() || state.is(net.minecraft.world.level.block.Blocks.LIGHT)) seen.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+                    }
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E {} Depths: room {} of {}, palette {}", type, room == null ? null : room.id, s.layout().rooms(s.run().seed()).length, java.util.Arrays.toString(palette));
+                    return room != null && com.ascensiondungeons.gen.authored.AuthoredLayout.inDepths(room) && seen.contains(palette[0]) && seen.contains(palette[1]) && seen.contains("minecraft:light");
+                }
+            }));
+            steps.add(new Step(type + ": a chest in the Depths gives marked loot", 200, new BooleanSupplier() {
+                boolean used;
+                @Override public boolean getAsBoolean() {
+                    double edge = dive().returnCentre().z - 14;
+                    if (!used) {
+                        for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
+                        for (int[] c : features("CHEST")) if (c[2] > edge && opened.add(c[0] + "," + c[1] + "," + c[2])) { use(c); used = true; return false; }
+                        throw new IllegalStateException("no chest in the Depths");
+                    }
+                    if (!takeAll()) return false;
+                    int[] c = count();
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E {} chest: {}", type, describeInventory());
+                    return c[0] > 0 && c[0] == c[1];
+                }
+            }));
+            steps.add(new Step(type + ": the portal shows the toll, and paying it lets the player out", 300, new BooleanSupplier() {
+                boolean moved, paid;
+                int before, shownNow;
+                @Override public boolean getAsBoolean() {
+                    OutbreakDive d = dive();
+                    if (!paid) {
+                        if (!moved) { Vec3 p = d.portalCentre(); bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f); moved = true; return false; }
+                        if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.TollMenu menu)) return false;
+                        before = totalItems();
+                        for (int i = 0; i < com.ascensiondungeons.mc.TollMenu.SHOWN; i++) shownNow += menu.getSlot(i).getItem().getCount();
+                        menu.clicked(com.ascensiondungeons.mc.TollMenu.PAY, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                        paid = true;
+                        return false;
+                    }
+                    if (bot.level() != server.overworld()) return false;
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E {} toll: had {} item(s), shown {}, left with {}", type, before, shownNow, totalItems());
+                    return shownNow == Math.max(1, (int) Math.round(before * 0.35)) && totalItems() == before - shownNow && count()[1] == 0;
+                }
+            }));
+            steps.add(new Step(type + ": the player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
+        }
+    }
+
+    private static void addRun(Supplier<RunManager> manager, String label, String type) {
+        steps.add(new Step(label + ": a " + type + " run is accepted", 40, new BooleanSupplier() {
             Run run;
             @Override public boolean getAsBoolean() {
                 if (run == null) {
                     opened.clear();
-                    var result = manager.get().request(Set.of(ID), "water");
+                    var result = manager.get().request(Set.of(ID), type);
                     if (!result.ok()) throw new IllegalStateException("request refused: " + result.error());
                     run = result.run();
                 }
