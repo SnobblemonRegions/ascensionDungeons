@@ -201,13 +201,13 @@ public final class OutbreakDive {
         return out;
     }
 
-    String describe() {
+    public String describe() {
         return "outbreak stage=" + stage() + " tier=" + tier() + " portal=" + portal.state() + " " + Math.round(portal.charge() * 100) + "% enemies=" + enemies.size()
                 + " features=" + features.size() + " settled=" + settled.size();
     }
 
     /** Operator aid: one line per feature, "KIND rarity x y z". */
-    List<String> featureLines() {
+    public List<String> featureLines() {
         List<String> out = new ArrayList<>();
         for (Feature f : features.values())
             out.add(f.kind + " " + (f.rarity == null ? "-" : f.rarity.name()) + " " + f.pos.getX() + " " + f.pos.getY() + " " + f.pos.getZ() + (f.used ? " used" : ""));
@@ -215,7 +215,14 @@ public final class OutbreakDive {
     }
 
     /** Operator aid: bank everyone's haul as a checkpoint would. */
-    void operatorCheckpoint() { if (!closed) checkpoint("Checkpoint (operator)"); }
+    public void operatorCheckpoint() { if (!closed) checkpoint("Checkpoint (operator)"); }
+
+    /** Test aid: the dive's living enemies. */
+    public List<Mob> enemyMobs() {
+        List<Mob> out = new ArrayList<>();
+        for (Enemy en : enemies.values()) if (en.mob.isAlive()) out.add(en.mob);
+        return out;
+    }
 
     // ---- the clock -------------------------------------------------------------------------------------------
 

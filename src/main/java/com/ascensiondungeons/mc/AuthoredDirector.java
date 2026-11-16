@@ -229,7 +229,9 @@ public final class AuthoredDirector implements ArenaDirector {
         }
         @Override public void zoneTier(int tier) { if (ascension != null) ascension.openZone(level.dimension().location().toString(), tier); }
         @Override public void empower(Mob mob, double damageMultiplier) { if (combat != null) combat.empower(mob, damageMultiplier); }
-        @Override public boolean combatManaged(Mob mob) { return combat != null && cfg.authoredCombat && aggressors.contains(mob); }
+        /** Real-time Pokémon combat runs when the config asks for it, and always in an Outbreak dive (its enemies must fight). */
+        boolean combatOn() { return combat != null && (cfg.authoredCombat || dive != null); }
+        @Override public boolean combatManaged(Mob mob) { return combatOn() && aggressors.contains(mob); }
         private boolean isTrial(String id) {
             for (JsonObject m : mechanics) if (id.equals(Jx.s(m, "id", "?"))) return "trial".equals(Jx.s(m, "type", ""));
             return false;
@@ -275,7 +277,7 @@ public final class AuthoredDirector implements ArenaDirector {
                 String intro = Jx.s(layout.data().completion, "intro", layout.data().name);
                 say(intro, ChatFormatting.AQUA);
             }
-            if (combat != null && cfg.authoredCombat && now % 2 == 0) {
+            if (combatOn() && now % 2 == 0) {
                 aggressors.removeIf(m -> !m.isAlive());
                 combat.tick(level, now, aggressors);
             }

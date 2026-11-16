@@ -28,6 +28,7 @@ public final class AscensionDungeons implements ModInitializer {
     public void onInitialize() {
         if (System.getenv("DUNGEONSPIKE_BENCH") != null) com.ascensiondungeons.spike.Bench.install();
         if (System.getenv("DUNGEONSPIKE_E2E") != null) com.ascensiondungeons.spike.E2E.install();
+        if (System.getenv("DUNGEONSPIKE_DIVE") != null) com.ascensiondungeons.spike.DiveE2E.install(() -> manager);
 
         net.minecraft.core.Registry.register(net.minecraft.core.registries.BuiltInRegistries.CHUNK_GENERATOR,
                 net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("ascensiondungeons", "district"),
@@ -71,7 +72,9 @@ public final class AscensionDungeons implements ModInitializer {
             com.ascensiondungeons.mc.AuthoredBridges.PokemonSpawner pk = FabricLoader.getInstance().isModLoaded("cobblemon") ? newPokemonSpawner() : null;
             com.ascensiondungeons.mc.AuthoredBridges.RaidBridge rb = FabricLoader.getInstance().isModLoaded("cobbleraids") ? newRaidBridge(cfg) : null;
             com.ascensiondungeons.mc.AuthoredBridges.Ascension asc = FabricLoader.getInstance().isModLoaded("ascensionlib") ? com.ascensiondungeons.mc.AscensionBridge.tryCreate() : null;
-            com.ascensiondungeons.mc.AuthoredBridges.Combat combat = pk != null && cfg.authoredCombat ? newCombat(cfg) : null;
+            // Built whenever Cobblemon is present: Outbreak dives always use it, other authored dungeons only with authoredCombat.
+            com.ascensiondungeons.mc.AuthoredBridges.Combat combat = pk != null ? newCombat(cfg) : null;
+            if (pk != null) com.ascensiondungeons.mc.RunLoot.partyItems = newPartyItems();
             auth.bridges(cfg, pk, rb, asc, combat);
             host.ascension(asc);
             com.ascensiondungeons.mc.AuthoredDirector.current = auth;
@@ -115,12 +118,15 @@ public final class AscensionDungeons implements ModInitializer {
             com.ascensiondungeons.mc.AuthoredDirector.current = null;
             com.ascensiondungeons.mc.RunLoot.runOfDimension = null;
             com.ascensiondungeons.mc.RunLoot.chestListener = null;
+            com.ascensiondungeons.mc.RunLoot.partyItems = null;
             arenas = java.util.List.of();
         });
     }
 
     /** Kept separate so Cobblemon / CobbleRaids classes load only when the mod is present. */
     private com.ascensiondungeons.mc.AuthoredBridges.PokemonSpawner newPokemonSpawner() { return new com.ascensiondungeons.mc.AuthoredPokemon(); }
+
+    private com.ascensiondungeons.mc.RunLoot.PartyItems newPartyItems() { return new com.ascensiondungeons.mc.AuthoredPartyItems(); }
 
     private com.ascensiondungeons.mc.AuthoredBridges.Combat newCombat(RunConfig cfg) { return new com.ascensiondungeons.mc.AuthoredCombat(cfg.combatFaintSeconds, cfg.combatDamageMultiplier, cfg.moveCooldownBaseSeconds, cfg.moveCooldownSecondsPerPower); }
 
