@@ -65,7 +65,7 @@ public final class DiveE2E {
                     if ("all".equalsIgnoreCase(System.getenv("DUNGEONSPIKE_DIVE"))) smoke(server, manager);
                     else script(server, manager);
                 }
-                if (channel != null) channel.releaseOutbound();
+                if (channel != null) for (Object out; (out = channel.readOutbound()) != null; ) capture(out);
                 if (bot != null && !bot.isRemoved() && bot.connection != null) {
                     // A real client confirms each dimension change; until then the server holds the player invulnerable.
                     if (bot.isChangingDimension()) bot.hasChangedDimension();
@@ -84,6 +84,22 @@ public final class DiveE2E {
                 finish(server);
             }
         });
+    }
+
+    /** What the server has sent the stand-in player: chat lines and screen titles, as a real client would get them. */
+    private static final List<String> chat = new ArrayList<>(), titles = new ArrayList<>();
+
+    private static void capture(Object out) {
+        if (out instanceof net.minecraft.network.protocol.BundlePacket<?> bundle) { for (Object sub : bundle.subPackets()) capture(sub); return; }
+        if (out instanceof net.minecraft.network.protocol.game.ClientboundSystemChatPacket c && !c.overlay()) chat.add(c.content().getString());
+        else if (out instanceof net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket t) titles.add(t.text().getString());
+        io.netty.util.ReferenceCountUtil.release(out);
+    }
+
+    private static boolean heard(String text) { for (String line : chat) if (line.contains(text)) return true; return false; }
+
+    private static com.ascensiondungeons.outbreak.Onboarding.Progress progress() {
+        return com.ascensiondungeons.mc.OnboardingStore.of(bot.server).progress(ID);
     }
 
     private static void next(MinecraftServer server) {
@@ -276,6 +292,18 @@ public final class DiveE2E {
         boolean cobblemon = FabricLoader.getInstance().isModLoaded("cobblemon");
         join(server);
         addRun(manager, "run 1");
+        steps.add(new Step("a first-time player is welcomed by the tutorial instead of the briefing, with a Guide bar pointing at a chest", 200, new BooleanSupplier() {
+            boolean logged;
+            @Override public boolean getAsBoolean() {
+                OutbreakDive d = dive();
+                if (!d.lessonsTold(ID).contains("WELCOME") || d.guideText(ID) == null) return false;
+                if (!logged) AscensionDungeonsLog.LOG.info("DIVE-E2E tutorial: told {}, title {}, guide bar \"{}\", chat {}", d.lessonsTold(ID), titles, d.guideText(ID), chat);
+                logged = true;
+                return heard("Guide: Welcome to your first dive") && heard("at risk until you leave through the extraction portal") && titles.contains("Welcome to your first dive")
+                        && !heard("An Outbreak is building here") && "LOOT".equals(d.guideGoal(ID))
+                        && d.guideText(ID).matches("Guide: Open a loot chest {2}[\u2190-\u2199] \\d+m.*") && progress().dives() == 1 && progress().rookie();
+            }
+        }));
         steps.add(new Step("a wave spawns" + (cobblemon ? " and its enemies are uncatchable, unbattleable Pokémon from the water pools" : ""), 1200, () -> {
             List<Mob> mobs = dive().enemyMobs();
             if (mobs.isEmpty()) return false;
@@ -288,6 +316,14 @@ public final class DiveE2E {
         steps.add(new Step("an enemy reaches the player and hurts them (combat and targeting work)", 2400, () -> {
             if (bot.getHealth() < bot.getMaxHealth()) { AscensionDungeonsLog.LOG.info("DIVE-E2E player health {} of {}", bot.getHealth(), bot.getMaxHealth()); return true; }
             return false;
+        }));
+        steps.add(new Step("the Outbreak and the enemies are explained one at a time, not all at once", 900, () -> {
+            bot.setInvulnerable(true);
+            bot.setHealth(bot.getMaxHealth());
+            List<String> told = dive().lessonsTold(ID);
+            if (!told.contains("OUTBREAK") || !told.contains("ENEMIES")) return false;
+            AscensionDungeonsLog.LOG.info("DIVE-E2E tutorial so far: {}", told);
+            return told.indexOf("WELCOME") == 0 && heard("Guide: The Outbreak") && heard("Guide: Enemies");
         }));
         steps.add(new Step("the player walks out of the entrance room through the tunnel, down the stairway and into the generated Depths", 600, new Walk("down",
                 DiveE2E::depthsEntrance, new BooleanSupplier() {
@@ -329,6 +365,13 @@ public final class DiveE2E {
                 for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
                 return c[0] > 0 && c[0] == c[1];
             }
+        }));
+        steps.add(new Step("the tutorial explains the Depths and unbanked loot, and the Guide bar turns to getting out", 1500, () -> {
+            OutbreakDive d = dive();
+            List<String> told = d.lessonsTold(ID);
+            if (!told.contains("DEPTHS") || !told.contains("UNBANKED")) return false;
+            AscensionDungeonsLog.LOG.info("DIVE-E2E tutorial in the Depths: told {}, guide bar \"{}\"", told, d.guideText(ID));
+            return "EXTRACT".equals(d.guideGoal(ID)) && d.guideText(ID).startsWith("Guide: Get back to the extraction portal and leave") && heard("Guide: Your loot is at risk");
         }));
         steps.add(new Step("a wave follows the party into the Depths", 1200, () -> {
             for (Mob m : dive().enemyMobs()) if (deep(m.getX(), m.getY(), m.getZ())) { AscensionDungeonsLog.LOG.info("DIVE-E2E enemy {} in the Depths at {}", m.getName().getString(), m.blockPosition().toShortString()); return true; }
@@ -433,7 +476,51 @@ public final class DiveE2E {
             }
         }));
         steps.add(new Step("the knocked-out player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
+        steps.add(new Step("the knock-out is explained on screen and in chat, and the player is still being taught", 40, () -> {
+            AscensionDungeonsLog.LOG.info("DIVE-E2E after the knock-out: titles {}, knock-outs {}, graduated {}", titles, progress().knockOuts(), progress().graduated());
+            boolean ok = heard("Guide: Knocked out") && heard("everything you brought with you, is safe") && titles.contains("Knocked out") && progress().knockOuts() == 1 && progress().rookie();
+            chat.clear();
+            titles.clear();
+            return ok;
+        }));
+        steps.add(new Step("the dive guide opens as a window with a page for every lesson, and nothing can be taken from it", 40, new BooleanSupplier() {
+            boolean opened;
+            @Override public boolean getAsBoolean() {
+                if (!opened) { com.ascensiondungeons.mc.GuideMenu.open(bot, progress(), 35); opened = true; return false; }
+                if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.GuideMenu menu)) return false;
+                int pages = 0, met = 0;
+                for (int i = 0; i < 27; i++) {
+                    ItemStack page = menu.getSlot(i).getItem();
+                    if (page.isEmpty()) continue;
+                    pages++;
+                    var lore = page.get(net.minecraft.core.component.DataComponents.LORE);
+                    if (lore != null && lore.lines().get(lore.lines().size() - 1).getString().equals("You have met this.")) met++;
+                }
+                int before = totalItems();
+                menu.clicked(0, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                menu.clicked(3, 0, net.minecraft.world.inventory.ClickType.QUICK_MOVE, bot);
+                boolean untouched = totalItems() == before && menu.getCarried().isEmpty() && !menu.getSlot(0).getItem().isEmpty();
+                String first = menu.getSlot(0).getItem().getHoverName().getString();
+                bot.closeContainer();
+                AscensionDungeonsLog.LOG.info("DIVE-E2E guide: {} pages, {} met, first \"{}\"", pages, met, first);
+                return pages == com.ascensiondungeons.outbreak.Onboarding.Lesson.values().length && met >= 5 && met < pages && untouched && first.equals("Welcome to your first dive")
+                        && totalItems() == before;
+            }
+        }));
+        steps.add(new Step("what the player has learned survives a save and a reload", 20, () -> {
+            var store = com.ascensiondungeons.mc.OnboardingStore.of(bot.server);
+            var tag = store.save(new net.minecraft.nbt.CompoundTag(), bot.server.registryAccess());
+            var back = com.ascensiondungeons.mc.OnboardingStore.load(tag, bot.server.registryAccess()).progress(ID);
+            var now = progress();
+            return back.seenBits() == now.seenBits() && back.seenBits() != 0 && back.dives() == 1 && back.knockOuts() == 1 && back.extractions() == 0 && !back.off();
+        }));
         addRun(manager, "run 2");
+        steps.add(new Step("second dive: the ordinary briefing, nothing repeated, and the Guide bar is still there", 300, () -> {
+            OutbreakDive d = dive();
+            if (d.guideText(ID) == null || !heard("An Outbreak is building here")) return false;
+            AscensionDungeonsLog.LOG.info("DIVE-E2E second dive: told {}, guide bar \"{}\"", d.lessonsTold(ID), d.guideText(ID));
+            return !d.lessonsTold(ID).contains("WELCOME") && !heard("Guide: Welcome") && "LOOT".equals(d.guideGoal(ID)) && progress().dives() == 2;
+        }));
         steps.add(new Step("run 2: loot a chest", 100, new BooleanSupplier() {
             boolean used;
             @Override public boolean getAsBoolean() {
@@ -493,7 +580,19 @@ public final class DiveE2E {
             }
         }));
         steps.add(new Step("the tolled player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
+        steps.add(new Step("leaving through the portal finishes the tutorial", 40, () -> {
+            AscensionDungeonsLog.LOG.info("DIVE-E2E after the toll: titles {}, extractions {}, graduated {}", titles, progress().extractions(), progress().graduated());
+            boolean ok = heard("Guide: Extracted") && heard("You paid the toll and kept the rest") && titles.contains("Extracted") && progress().graduated() && !progress().rookie();
+            chat.clear();
+            titles.clear();
+            return ok;
+        }));
         addRun(manager, "run 3");
+        steps.add(new Step("a graduate has no Guide bar and is told only about what they have never met", 300, () -> {
+            OutbreakDive d = dive();
+            if (!heard("An Outbreak is building here")) return false;
+            return d.guideText(ID) == null && d.guideGoal(ID) == null && !heard("Guide: Welcome") && !heard("Guide: The Outbreak");
+        }));
         steps.add(new Step("run 3: loot a chest", 100, new BooleanSupplier() {
             boolean used;
             @Override public boolean getAsBoolean() {

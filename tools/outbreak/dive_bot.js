@@ -1,7 +1,7 @@
 // Live check of an Outbreak dive in the water dungeon, played by a mineflayer bot against a real dev server.
 //
 // It loots rarity chests, banks at a checkpoint, uses a curse altar, waits for a timer chest, opens an outbreak chest and a
-// strongbox, walks out through the tunnel and down the stairway into the Depths and back up again (its own client physics, no
+// strongbox, checks the first-dive tutorial (welcome, title, Guide bar, guide window, graduation), walks out through the tunnel and down the stairway into the Depths and back up again (its own client physics, no
 // teleport), reads the extraction screen and pays the 35% toll; then it checks a
 // knock-out, a walk-out, a disconnect, and beating the gatekeeper.
 //
@@ -22,7 +22,13 @@ function connect() {
   return new Promise(resolve => {
     const bot = mineflayer.createBot({ host: '127.0.0.1', port: 25565, username: 'RunBot', version: '1.21.1' });
     bot.loadPlugin(pathfinder);
-    bot.log = []; bot.bars = [];
+    bot.log = []; bot.bars = []; bot.titles = []; bot.boss = {};
+    // a title arrives as plain text, JSON or an NBT text component depending on the library version: keep whatever it is as a string to search
+    bot.on('title', (text, type) => { bot.titles.push((type || 'title') + ':' + (typeof text === 'string' ? text : JSON.stringify(text))); });
+    const bossText = b => { try { return b.title.toString(); } catch (e) { return String(b.title); } };
+    bot.on('bossBarCreated', b => { bot.boss[b.entityUUID] = bossText(b); });
+    bot.on('bossBarUpdated', b => { bot.boss[b.entityUUID] = bossText(b); });
+    bot.on('bossBarDeleted', b => { delete bot.boss[b.entityUUID]; });
     bot.on('message', m => bot.log.push(m.toString()));
     bot.on('actionBar', m => bot.bars.push(m.toString()));
     bot.on('kicked', r => console.log('KICKED', JSON.stringify(r).slice(0, 120)));
@@ -101,7 +107,21 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     let run = await startRun(bot);
     check('A run is an Outbreak dive with features', run.feats.length >= 8, run.describe.split('|')[0] + ' feats=' + run.feats.length);
     const kinds = k => run.feats.filter(f => f.kind === k);
-    check('A intro explains banking and the portal', bot.log.some(l => /Outbreak is building/.test(l)) && bot.log.some(l => /banked at a checkpoint/.test(l)));
+    // a player who has never dived gets the tutorial instead of the briefing: a welcome in chat and on screen, and a Guide bar
+    const guideBar = () => Object.values(bot.boss).find(t => /^Guide: /.test(t));
+    check('A a first dive opens with the tutorial welcome, not the briefing', bot.log.some(l => /Guide: Welcome to your first dive/.test(l)) && bot.log.some(l => /at risk until you leave through the extraction portal/.test(l))
+      && !bot.log.some(l => /Outbreak is building/.test(l)), bot.log.filter(l => /Guide: /.test(l)).join(' | '));
+    check('A the welcome is shown as a title on screen', bot.titles.some(t => /Welcome to your first dive/.test(t)), bot.titles.join(' | '));
+    check('A the Guide bar names the first goal and points the way', /^Guide: Open a loot chest  \S+ \d+m/.test(guideBar() || ''), guideBar());
+    let w = null;
+    const guideOpened = new Promise(resolve => { const t = setTimeout(() => resolve(null), 6000); bot.once('windowOpen', x => { clearTimeout(t); resolve(x); }); });
+    bot.chat('/dungeon guide');
+    w = await guideOpened;
+    await sleep(500);
+    const pages = w ? w.slots.slice(0, 27).filter(Boolean) : [];
+    check('A /dungeon guide opens a window with a page for every lesson', !!w && pages.length === 21 && /Dive guide/.test(String(w.title && (w.title.value || w.title))), w ? pages.length + ' pages' : 'no window');
+    if (w) { const before = (await inv(bot)).total; try { await bot.clickWindow(0, 0, 0); } catch (e) {} await sleep(300); bot.closeWindow(w); await sleep(400);
+      check('A nothing can be taken out of the guide', (await inv(bot)).total === before, before + ' item(s) before and after'); }
     const timer = kinds('TIMER_CHEST')[0];
     let opened = await use(bot, timer.x, timer.y, timer.z);
     check('A timer chest is sealed at stage 0', !opened && bot.bars.some(b => /Sealed until/.test(b)), bot.bars.slice(-1)[0]);
@@ -120,7 +140,9 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     const n = bot.log.length;
     await use(bot, altar.x, altar.y, altar.z);
     const after = await stageOf(bot);
-    check('A curse altar surges the Outbreak', bot.log.slice(n).some(l => /altar's curse/.test(l)) && after > before, `stage ${before} -> ${after}`);
+    // how far the curse pushes the clock is unit-tested; here: it is announced, the altar is spent, and the stage never falls
+    const spent = (await cmd(bot, '/dungeon dive', 1200)).includes(`feature ALTAR - ${altar.x} ${altar.y} ${altar.z} used`) || /ALTAR \S+ -?\d+ -?\d+ -?\d+( depths)? used/.test(bot.log.slice(n).join(' '));
+    check('A curse altar is taken: announced, spent, and the Outbreak does not fall', bot.log.slice(n).some(l => /altar's curse/.test(l)) && spent && after >= before, `stage ${before} -> ${after}`);
     for (let i = 0; i < 150 && (await stageOf(bot)) < 2; i++) await sleep(1000);
     check('A stage announcements were made', bot.log.some(l => /The Outbreak grows: stage/.test(l)), bot.log.filter(l => /Outbreak grows/.test(l)).length + ' announcement(s)');
     opened = await use(bot, timer.x, timer.y, timer.z);
@@ -142,7 +164,7 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     let nb = bot.bars.length;
     const down = await walkTo(bot, deep[0].x, deep[0].y, deep[0].z, 2);
     check('A the player walks through the tunnel and down the stairway into the Depths, with no teleport',
-      down.ok && down.forced === 0 && down.drop >= 8 && bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)) && bot.log.some(l => /The Depths: a maze/.test(l)),
+      down.ok && down.forced === 0 && down.drop >= 8 && bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)),
       JSON.stringify(down));
     const before5 = await inv(bot);
     opened = await use(bot, deep[0].x, deep[0].y, deep[0].z);
@@ -152,6 +174,10 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     nb = bot.bars.length;
     const up = await walkTo(bot, mouth.x, mouth.y, mouth.z, 1);
     check('A the player walks back up the stairway to the entrance room, with no teleport', up.ok && up.forced === 0 && bot.bars.slice(nb).some(b => /climb back/.test(b)), JSON.stringify(up));
+    // by now the tutorial has explained what the player met, one lesson at a time, and the Guide bar has moved on to getting out
+    const told = bot.log.filter(l => /^Guide: /.test(l)).map(l => l.replace('Guide: ', ''));
+    check('A the tutorial explained things as they were met', ['The Outbreak', 'Loot chests', 'Your loot is at risk', 'The Depths'].every(t => told.includes(t)) && new Set(told).size === told.length, told.join(' | '));
+    check('A the Guide bar now asks the player to get out', /^Guide: Get back to the extraction portal and leave/.test(guideBar() || ''), guideBar());
     // extraction: the screen shows exactly what the toll takes; pay it
     const portal = kinds('PORTAL')[0];
     const before4 = await inv(bot);
@@ -174,9 +200,15 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
       `${before4.total} item(s) before, toll showed ${toll2 ? toll2.shown : '?'}, ${i4.total} after, ${i4.tagged} marked | ${bot.log.slice(n5).filter(l => /Toll paid/.test(l))[0] || ''}`);
     r = await cmd(bot, '/dungeon status');
     check('A the player is out of the run', /not in a dungeon run/.test(r), r);
+    // leaving through the portal finishes the tutorial
+    r = await cmd(bot, '/dungeon tutorial', 1000);
+    check('A extracting is explained and finishes the tutorial', bot.log.some(l => /Guide: Extracted/.test(l)) && bot.titles.some(t => /Extracted/.test(t)) && /Dive tutorial: finished/.test(r) && /extractions 1/.test(r), r);
 
     // ---------------- B: knocked out
+    const nB = bot.log.length;
     run = await startRun(bot);
+    check('B a graduate gets the short briefing and no Guide bar', bot.log.slice(nB).some(l => /Outbreak is building/.test(l)) && !bot.log.slice(nB).some(l => /Guide: Welcome/.test(l))
+      && !Object.values(bot.boss).some(t => /^Guide: /.test(t)), Object.values(bot.boss).join(' | '));
     const c2 = run.feats.filter(f => f.kind === 'CHEST');
     await use(bot, c2[0].x, c2[0].y, c2[0].z);
     const b1 = await inv(bot);
@@ -189,6 +221,12 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     check('B unbanked loot is taken, nothing else', b1.tagged > 0 && b2.items === 0 && b2.tagged === 0, `${b1.items} stacks before (${b1.tagged} marked), ${b2.items} after`);
     r = await cmd(bot, '/dungeon status');
     check('B the player is out of the run', /not in a dungeon run/.test(r), r);
+    // the tutorial can be started over and switched off
+    r = await cmd(bot, '/dungeon tutorial reset', 900);
+    const r2 = await cmd(bot, '/dungeon tutorial', 900);
+    const r3 = await cmd(bot, '/dungeon tutorial off', 900);
+    const r4 = await cmd(bot, '/dungeon tutorial', 900);
+    check('B the tutorial can be started over and switched off', /started over/.test(r) && /Dive tutorial: on/.test(r2) && /Dives 0/.test(r2) && /tutorial off/.test(r3) && /Dive tutorial: off/.test(r4), [r, r2, r3, r4].join(' || '));
 
     // ---------------- C: banked loot survives a walk-out, unbanked does not
     run = await startRun(bot);

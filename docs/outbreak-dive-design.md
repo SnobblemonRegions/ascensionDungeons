@@ -36,8 +36,8 @@ it is to keep all of it: that is the decision the whole run builds up to.
   with twelve effects between them (pull, push, knock-up, slow, freeze, burn, poison, wither, blind, levitate, weaken, plain damage).
   Killing the caster cancels the cast.
 - **The Depths.** A tunnel cut through a wall of the entrance room becomes a stairway of half-slab steps (no jumping) that descends
-  eight blocks into a procedural
-  maze: about 37 rooms on a 7 x 7 grid, joined with loops, in eight shapes (entrance hall, hall, pillars, cross, ring, aisles, dais,
+  eight blocks into a procedural maze. Tunnel, stairway and the maze's passages are five wide and at least six high, so the
+  largest Pokémon in the pools fit. The maze is about 37 rooms on a 7 x 7 grid, joined with loops, in eight shapes (entrance hall, hall, pillars, cross, ring, aisles, dais,
   vault; dead ends are usually vaults), built from the dungeon's own blocks and different every run.
   `docs/outbreak-depths-preview.png` shows two. Most of the run's chests are down there. It is one connected place: players walk
   down and back, and so can enemies. Nothing teleports. The tunnel is in the same spot every run, signposted in the entrance room,
@@ -129,8 +129,9 @@ Exact for Pokémon (real-time combat asks the dive); approximated for vanilla fa
 ## How the Depths are joined
 
 `DepthsLink.find` runs once per dungeon (not per run, so the way down never moves). From the entry cell and every standing cell
-of the entrance room it walks straight to each of the four walls and asks whether a tunnel three wide and three high can go
-from there to the edge of the schematic. A tunnel is refused if it or the ring of blocks around it would:
+of the entrance room it walks straight to each of the four walls and asks whether a tunnel can go from there to the edge of the
+schematic. `findWidest` asks for five wide and six high first, then five high, four, three, and only then three wide, and takes
+the first size that has a safe place. A tunnel is refused if it or the ring of blocks around it would:
 
 - touch air that is not the entrance room's own (another room or a passage);
 - run beside water, lava, or anything that falls (sand, gravel);
@@ -140,20 +141,56 @@ from there to the edge of the schematic. A tunnel is refused if it or the ring o
 Where the room's wall slopes or bulges (most of the entrance rooms are domes), the first six blocks may run beside the room's
 own air. Among the tunnels that are allowed, the shortest wins, with a penalty for starting on a ledge above the floor the party
 lands on or within six blocks of where it lands. Outside the schematic the stairway builds its own shell from the Depths'
-blocks: three wide, four high, level for two blocks, then one block down every two, eight down in all over 28 blocks, with a
+blocks: as wide as the tunnel and seven high (five high for a three-wide one), level for two blocks, then one block down every two, eight down in all over 28 blocks, with a
 light every four. Each drop is split by a slab, so the walk is half a block at a time and nobody has to jump, up or down. The
 slab is the first that exists of: `depths.step` in `outbreak.json`, the slab forms of the four Depths blocks, the slabs the
 dungeon itself uses most, and smooth stone. The maze is turned so that its doorway faces the stairway. An accent frame marks the tunnel in the entrance room, and a floating label
 names it.
 
-All seventeen type dungeons get a tunnel this way: five to ten blocks long, out of the north or west wall of the entrance room.
+All seventeen type dungeons get the full size this way, five wide and six high: five to ten blocks long, out of the north or
+west wall of the entrance room.
 If a future dungeon had no safe place, `find` falls back to **detached** Depths with a teleporting stairway (two pads), which is
 how the first version worked; `"link": "pad"` under `depths` in `outbreak.json` forces that.
 
 Enemies need nothing special: waves spawn in whichever room the party is in, Depths rooms included, and the tunnel and stairway
 are ordinary walkable ground for them. An enemy sees 26 blocks, so one left in the entrance room follows a player down only
-while it can still see them. A Pokémon wider than the three-block tunnel cannot follow at all; waves still reach the party
-because they spawn where the party is.
+while it can still see them.
+
+**Why five by six.** Of the 327 species in the dungeons' pools, the widest hitbox is 2.7 blocks (Mamoswine, Salamence) and the
+tallest 5.1 (Golurk; Tropius is 5.0, twelve more are between 3 and 4). The first tunnel was three wide and three high where it
+left the entrance room, which shut out fourteen species by height and left no room to turn for the fourteen over two blocks
+wide. The maze's own passages were three by four and had the same problem, so they were widened too, and each room shape now
+keeps a five-wide lane clear: pillars stand off the middle lanes, the ring room's walkway is five wide, the aisle room's walls
+have five-wide gaps. The stairway is a block higher than the passages because a long body coming down still rests on the tread
+behind it while its head passes under the roof of the tread in front. `"passage": 3` under `depths` in `outbreak.json` gives
+the old narrow maze and tunnel back.
+
+## The first-dive tutorial
+
+A player who has never dived is taught by doing, not by a wall of text at the door. Nothing needs a client mod: lessons are
+chat lines with a chime, the big moments also put a title on the screen, the goals are a boss bar, and the notes are a chest
+window.
+
+- **Lessons.** Twenty-one, each told once per player, the first time the thing happens to them: the welcome, the Outbreak,
+  enemies, spells, chests, unbanked loot, checkpoints, a stage rising, the tunnel, the Depths, each special chest, the altar, low
+  health, time running out, the portal (once they carry something they could lose), the gatekeeper, a knock-out, and leaving.
+  They are paced: eight seconds apart, two for something happening right now (a spell ring, low health). A lesson about a place
+  the player has walked away from is dropped and told at the next one.
+- **The Guide bar.** A pink boss bar, only for a player who has not yet extracted: *Open a loot chest*, *Take the tunnel down
+  to the Depths*, *Loot a chest in the Depths*, *Get back to the extraction portal and leave*, each with an arrow relative to
+  the way the player faces, the distance, and "above you" or "below you". It points at a chest that player has not opened, and
+  from the Depths it points to the doorway first, then the tunnel's mouth, then the portal.
+- **Graduating.** Leaving through the portal once, by the toll or past the gatekeeper, finishes the tutorial. A knock-out does
+  not: the next dive keeps the Guide bar but repeats nothing already told. A graduate gets the short briefing at the door and is
+  still told about anything they have never met (a strongbox, say).
+- **Per player.** Everything is sent to one player, so a veteran in the same party is not lectured.
+- **`/dungeon guide`** opens the notes for anyone, anywhere: one item per lesson to hover over, marked met or not yet met.
+  **`/dungeon tutorial`** shows a player's own state; `off`, `on` and `reset` change it.
+- **Kept** in the world's saved data (`data/ascensiondungeons_onboarding.dat` in the overworld), written with the world.
+
+`outbreak/Onboarding` holds the rules (pure, unit tested): the words, the pacing, the goals, the arrow. `mc/DiveCoach` delivers
+them inside one dive, `mc/OnboardingStore` keeps them, `mc/GuideMenu` is the window, and `OutbreakDive` tells the coach what
+each player is near or going through.
 
 ## Chest models
 
@@ -166,10 +203,10 @@ see a floating chorus fruit. A chest is always identifiable without it (label, s
 
 | What | How | Result |
 |---|---|---|
-| Rules and data | `./gradlew test` | 213 tests pass. Includes 300 seeds of Depths (every standing cell reachable, sealed shell, loops, lighting); the link (never breaks into another room, never beside water or sand, never through a mechanism, sloped walls, half steps); and, for all 17 type dungeons: valid settings, full feature placement on sound ground for 40 seeds each, a tunnel found, and a walk from the entry cell through the tunnel to the maze's first room, to its farthest room, and back |
-| Every type dungeon, whole mod set | `DUNGEONSPIKE_DIVE=all ./gradlew runServer` (`spike/DiveE2E`): a stand-in player joins through the normal login path and plays a short dive in each | 137/137. In each dungeon a wave of that type's Pokémon spawns; a walk is found through the blocks that are really in the world from where the player lands, through the tunnel, down eight half-slab steps and into the Depths, and the player is moved along it (53 to 72 blocks); the dive notices them arrive; a chest down there gives marked loot; the walk back up to the entrance room exists and is followed; the toll is shown and paying it lets the player out |
-| One long dive, whole mod set | `DUNGEONSPIKE_DIVE=1 ./gradlew runServer` (water) | 31/31: enemies are uncatchable, unbattleable Pokémon that hunt and hurt the player; the walk down and back; **a Pokémon that spawned in the entrance room chased the player down the stairway to its foot**; checkpoint; knock-out; loot hidden on a party Pokémon is banked, stripped or forfeit; the toll window shows exactly what paying takes; beating the gatekeeper opens the portal |
-| The same over the real protocol | `tools/outbreak/dive_bot.js`: a mineflayer bot with its own client physics and pathfinding, server without Cobblemon | 26/26. The bot **walked** from the tunnel's mouth down the stairway to a chest in the Depths (48 blocks, 8 down) and back up to the entrance room, and the server did not correct its position once either way. Over real packets the extraction window opened as a chest screen, showed 7 of 20 unbanked items, a click on a shown item moved nothing, paying took exactly those 7 and one win, and beating the gatekeeper let the player out with everything; marking, banking, altar, timer chest, outbreak chest, strongbox, knock-out, walk-out and the login sweep all pass |
+| Rules and data | `./gradlew test` | 230 tests pass. Includes 300 seeds of Depths (every standing cell reachable, sealed shell, loops, lighting); a body three blocks square and six tall reaching every room of the maze over 60 seeds; the link (never breaks into another room, never beside water or sand, never through a mechanism, sloped walls, half steps, the widest size the wall allows); the tutorial's rules (each lesson once, pacing, urgent lessons first, goals, graduation, off and reset, the arrow); and, for all 17 type dungeons: valid settings, full feature placement on sound ground for 40 seeds each, a five-by-six tunnel found, a walk from the entry cell through the tunnel to the maze's first room, to its farthest room and back, and the big body making the same trip |
+| Every type dungeon, whole mod set | `DUNGEONSPIKE_DIVE=all ./gradlew runServer` (`spike/DiveE2E`): a stand-in player joins through the normal login path and plays a short dive in each | 137/137. In each dungeon a wave of that type's Pokémon spawns; a walk is found through the blocks that are really in the world from where the player lands, through the tunnel, down eight half-slab steps and into the Depths, and the player is moved along it; the dive notices them arrive; a chest down there gives marked loot; the walk back up to the entrance room exists and is followed; the toll is shown and paying it lets the player out |
+| One long dive, whole mod set | `DUNGEONSPIKE_DIVE=1 ./gradlew runServer` (water) | 40/40. Tutorial: a first-time player gets the welcome in chat and as a title instead of the briefing, and a Guide bar pointing at a chest; the Outbreak and enemies are explained one at a time; the Depths and unbanked loot are explained and the Guide bar turns to getting out; the knock-out is explained and the player stays a rookie; the guide window has 21 pages and nothing can be taken; progress survives a save and reload; the second dive has the ordinary briefing, repeats nothing and keeps the Guide bar; paying the toll graduates; a graduate has no Guide bar. Also: enemies are uncatchable, unbattleable Pokémon that hunt and hurt the player; the walk down and back; **a Pokémon that spawned in the entrance room chased the player down the stairway to its foot**; checkpoint; knock-out; loot hidden on a party Pokémon is banked, stripped or forfeit; the toll window shows exactly what paying takes; beating the gatekeeper opens the portal |
+| The same over the real protocol | `tools/outbreak/dive_bot.js`: a mineflayer bot with its own client physics and pathfinding, server without Cobblemon | 35/35. Over real packets: the welcome arrives as chat and as a screen title with its subtitle; the Guide bar arrives as a boss bar reading "Open a loot chest" with an arrow and a distance, and later "Get back to the extraction portal and leave"; fourteen lessons were told as their subjects were met, none twice; `/dungeon guide` opens a window of 21 pages and nothing can be taken; extracting graduates; a graduate gets the briefing and no Guide bar; `/dungeon tutorial reset` and `off` work. The bot **walked** from the tunnel's mouth down the stairway to a chest in the Depths (130 blocks, 8 down) and back up, and the server did not correct its position once. The extraction window showed 9 of 25 unbanked items, a click moved nothing, paying took exactly those; marking, banking, altar, timer chest, outbreak chest, strongbox, knock-out, walk-out, the login sweep and the gatekeeper all pass |
 | Chest pack | `ChestLookTest` | ids in the pack match the code; every model and texture exists |
 
 Use `-Dascensiondungeons.outbreakSpeed=12` for the live checks or they take many minutes.
@@ -180,7 +217,11 @@ face at coordinate -2 and walked itself into the block, which the server refused
 jumping eight times up a corridor is clumsy for anyone, so the steps became half slabs and the fault no longer arises.
 
 **Not verified.** How any of it looks and feels in a real client, the tunnel and stairway included: they are checked by walking
-the real blocks from code and by a protocol bot, not by eye. More than one player. A live AscensionLib (its jar needs a local
+the real blocks from code and by a protocol bot, not by eye. The same goes for the tutorial: that the words arrive is checked,
+whether they read well at the pace they come is not, and the arrows in the Guide bar have not been seen in the game's font. The
+portal lesson and the time-running-out lesson were not reached in a live run (their triggers are a line each; the words and
+pacing are unit tested). Whether a Pokémon as large as a Golurk really paths through the five-wide tunnel: the size is checked
+against Cobblemon's hitbox data and by a block model, not with the creature. More than one player. A live AscensionLib (its jar needs a local
 `webgui-dev.jar` and cannot be built here), so payouts are covered only by unit tests of the grouping and by log lines. The
 authored boss flow inside a dive. Whether a gatekeeper is beatable but hard at each stage: its numbers are guesses and need play.
 Performance with four players in the Depths at stage 5. The chest models in a client.
@@ -202,6 +243,11 @@ Performance with four players in the Depths at stage 5. The chest models in a cl
 12. **Without Lootr a dive dungeon runs as an ordinary dungeon**, with a warning.
 13. **Loot left by a crashed or abandoned run is removed at next login.**
 14. **Chest models are opt-in per dungeon** until the pack is hosted.
+15. **The tutorial teaches and changes nothing else.** A first dive has the same Outbreak, the same toll and the same knock-out
+    as any other. A softer first dive (a free first extraction, say) is a change to the economy and is left for you to decide.
+16. **Graduation is the first extraction**, not a number of dives: the loop is learned when it has been closed once.
+17. **The portal is explained only once the player carries loot.** It stands in the entrance room, and explaining the toll to
+    someone with nothing to lose is noise.
 
 ## Known gaps and next steps
 

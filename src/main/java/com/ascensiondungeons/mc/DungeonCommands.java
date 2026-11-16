@@ -71,6 +71,24 @@ public final class DungeonCommands {
                     reply(ctx, left ? "You left the dungeon." : "You are not in a dungeon run.");
                     return left ? 1 : 0;
                 }))
+                .then(Commands.literal("guide").executes(ctx -> {
+                    // The tutorial's notes, for anyone, anywhere: a chest window of pages to hover over.
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    AuthoredDirector director = AuthoredDirector.current;
+                    AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                    GuideMenu.open(p, OnboardingStore.of(p.server).progress(p.getUUID()), s != null && s.dive() != null ? s.dive().tollPercent() : 35);
+                    return 1;
+                }))
+                .then(Commands.literal("tutorial").executes(ctx -> {
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    var progress = OnboardingStore.of(p.server).progress(p.getUUID());
+                    reply(ctx, "Dive tutorial: " + (progress.off() ? "off" : progress.graduated() ? "finished (you still get a tip the first time you meet something new)" : "on")
+                            + ". Dives " + progress.dives() + ", extractions " + progress.extractions() + ", knock-outs " + progress.knockOuts()
+                            + ". Use /dungeon tutorial on, off or reset; /dungeon guide opens the notes.");
+                    return 1;
+                }).then(Commands.literal("off").executes(ctx -> tutorial(ctx, "off")))
+                        .then(Commands.literal("on").executes(ctx -> tutorial(ctx, "on")))
+                        .then(Commands.literal("reset").executes(ctx -> tutorial(ctx, "reset"))))
                 .then(Commands.literal("status").executes(ctx -> {
                     ServerPlayer p = ctx.getSource().getPlayerOrException();
                     RunManager m = manager.get();
@@ -219,6 +237,20 @@ public final class DungeonCommands {
         String left = r.state() == com.ascensiondungeons.run.RunState.ACTIVE
                 ? ", " + Math.max(0, (r.deadline() - now) / 20) + "s left" : "";
         return r.state() + " (" + r.members().size() + " player(s)" + left + ")";
+    }
+
+    /** Turns a player's own dive tutorial on or off, or starts it over. It takes effect from their next dive. */
+    private static int tutorial(CommandContext<CommandSourceStack> ctx, String what) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer p = ctx.getSource().getPlayerOrException();
+        OnboardingStore store = OnboardingStore.of(p.server);
+        var progress = store.progress(p.getUUID());
+        switch (what) {
+            case "off" -> { progress.setOff(true); reply(ctx, "Dive tutorial off: no Guide bar and no tips. /dungeon tutorial on brings it back."); }
+            case "on" -> { progress.setOff(false); reply(ctx, "Dive tutorial on."); }
+            default -> { progress.reset(); reply(ctx, "Dive tutorial started over: your next dive is taught from the beginning."); }
+        }
+        store.setDirty();
+        return 1;
     }
 
     private static void reply(CommandContext<CommandSourceStack> ctx, String text) {

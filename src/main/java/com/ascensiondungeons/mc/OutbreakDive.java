@@ -9,6 +9,7 @@ import com.ascensiondungeons.outbreak.DiveSettlement;
 import com.ascensiondungeons.outbreak.ExtractionPortal;
 import com.ascensiondungeons.outbreak.FeaturePlanner;
 import com.ascensiondungeons.outbreak.Haul;
+import com.ascensiondungeons.outbreak.Onboarding;
 import com.ascensiondungeons.outbreak.OutbreakClock;
 import com.ascensiondungeons.outbreak.Spell;
 import com.ascensiondungeons.outbreak.Toll;
@@ -110,6 +111,8 @@ public final class OutbreakDive {
         Display.TextDisplay label;
         Display.ItemDisplay model;
         int shownModel;
+        /** Down in the Depths, as opposed to in the hand-built dungeon. */
+        boolean deep;
         Feature(FeaturePlanner.Placement p, BlockPos pos) { this.kind = p.kind(); this.rarity = p.rarity(); this.pos = pos; this.shown = p.rarity(); }
     }
 
@@ -155,9 +158,16 @@ public final class OutbreakDive {
     private Vec3 tunnelMouth, depthsDoor;
     /** Players who are down in the Depths right now. */
     private final Set<UUID> below = new HashSet<>();
+    /** The first-dive tutorial for the players of this dive. */
+    private final DiveCoach coach;
+    /** Players who have had their opening words, whichever kind. */
+    private final Set<UUID> greeted = new HashSet<>();
+    /** Players who left by paying the toll (as opposed to past the gatekeeper). */
+    private final Set<UUID> tolled = new HashSet<>();
+    /** The chests each player has taken loot from, so the Guide points at one they have not. */
+    private final Map<UUID, Set<BlockPos>> looted = new HashMap<>();
     /** Players who just used the stairway and have not stepped off it yet, so they are not sent straight back. */
     private final Set<UUID> travelled = new HashSet<>();
-    private boolean depthsAnnounced;
     private OutbreakClock clock;
     private long now, nextWaveAt;
     private boolean bossDown, closed;
@@ -230,6 +240,8 @@ public final class OutbreakDive {
             features.put(doorPos, new Feature(new FeaturePlanner.Placement(FeaturePlanner.Kind.RETURN, null, "", door), doorPos));
         }
         if (portalCentre == null) throw new IllegalStateException("no room for an extraction portal");
+        for (Feature f : features.values()) f.deep = AuthoredLayout.inDepths(roomOf(Vec3.atBottomCenterOf(f.pos)));
+        coach = new DiveCoach(host.level(), tunnelMouth != null || descentCentre != null, tollPercent, this::guideTarget);
         outbreakBar = new ServerBossEvent(Component.literal("Outbreak"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.NOTCHED_6);
         portalBar = new ServerBossEvent(Component.literal("Extraction portal"), BossEvent.BossBarColor.BLUE, BossEvent.BossBarOverlay.PROGRESS);
         portalBar.setProgress(0f);
@@ -273,6 +285,15 @@ public final class OutbreakDive {
         return out;
     }
 
+    /** Test aid: the lessons the tutorial told this player in this dive, in order. */
+    public List<String> lessonsTold(UUID player) { return coach.told(player); }
+    /** Test aid: the Guide bar's text for this player, or null when they have none. */
+    public String guideText(UUID player) { return coach.guideText(player); }
+    /** Test aid: the goal the Guide bar is on for this player, or null. */
+    public String guideGoal(UUID player) { return coach.goal(player); }
+    /** The toll, as a percentage of unbanked loot. */
+    public int tollPercent() { return tollPercent; }
+
     /** Operator aid: bank everyone's haul as a checkpoint would. */
     public void operatorCheckpoint() { if (!closed) checkpoint("Checkpoint (operator)"); }
 
@@ -294,12 +315,8 @@ public final class OutbreakDive {
         if (clock == null) {
             clock = new OutbreakClock(params, now);
             nextWaveAt = now + waveEvery;
-            host.say("An Outbreak is building here. The longer you stay, the fiercer it gets and the more you carry out.", ChatFormatting.GOLD);
-            host.say("Loot is yours only once it is banked at a checkpoint or carried out through the extraction portal near the entrance.", ChatFormatting.GRAY);
-            host.say("Leaving has a price: beat the portal's gatekeeper, which grows with the Outbreak, or pay a toll of " + tollPercent + "% of your unbanked loot.", ChatFormatting.GRAY);
-            if (tunnelMouth != null)
-                host.say("A tunnel leads out of this room and down to the Depths: a maze that is different on every dive, with most of the chests.", ChatFormatting.GRAY);
         }
+        for (ServerPlayer p : players) if (greeted.add(p.getUUID())) greet(p);
         // Anyone who walked out or dropped off without extracting keeps only what they banked.
         for (Map.Entry<UUID, Run.Member> e : host.run().members().entrySet())
             if (e.getValue().presence() == Run.Presence.LEFT && !settled.contains(e.getKey())) settle(e.getKey(), Haul.Exit.LEFT);
@@ -323,6 +340,8 @@ public final class OutbreakDive {
 
         stairwayTick(players);
         if (tunnelMouth != null && now % 10 == 0) depthsTick(players);
+        if (now % 10 == 0) lessonsTick(players);
+        coach.tick(now, unsettled(players));
 
         if (!bossDown && !players.isEmpty() && now >= nextWaveAt) {
             enemies.values().removeIf(en -> !en.mob.isAlive());
@@ -349,10 +368,7 @@ public final class OutbreakDive {
             host.level().sendParticles(ParticleTypes.REVERSE_PORTAL, p.getX(), p.getY() + 1, p.getZ(), 40, 0.3, 0.6, 0.3, 0.05);
             p.teleportTo(host.level(), to.x, to.y, to.z, p.getYRot(), p.getXRot());
             sound(BlockPos.containing(to), SoundEvents.ENDERMAN_TELEPORT, 0.8f, down ? 0.7f : 1.3f);
-            if (down && !depthsAnnounced) {
-                depthsAnnounced = true;
-                host.say("The Depths: a maze that is different on every dive, with most of the dungeon's chests. The way back up is where you arrived, and the extraction portal is up there.", ChatFormatting.GOLD);
-            }
+            if (down) { coach.notice(p, Onboarding.Lesson.DEPTHS, now); coach.enteredDepths(p); }
             p.displayClientMessage(Component.literal(down ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
         }
     }
@@ -368,18 +384,96 @@ public final class OutbreakDive {
             boolean deep = AuthoredLayout.inDepths(room);
             if (deep == below.contains(id)) continue;
             if (deep) below.add(id); else below.remove(id);
-            if (deep && !depthsAnnounced) {
-                depthsAnnounced = true;
-                host.say("The Depths: a maze that is different on every dive, with most of the dungeon's chests. The only way out is back up the stairway, and the extraction portal is up there.", ChatFormatting.GOLD);
-            }
+            if (deep) { coach.notice(p, Onboarding.Lesson.DEPTHS, now); coach.enteredDepths(p); }
             p.displayClientMessage(Component.literal(deep ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
         }
+    }
+
+    private List<ServerPlayer> unsettled(List<ServerPlayer> players) {
+        List<ServerPlayer> out = new ArrayList<>(players.size());
+        for (ServerPlayer p : players) if (!settled.contains(p.getUUID())) out.add(p);
+        return out;
+    }
+
+    /** A player's opening words: the tutorial for someone new to dives, the short briefing for everyone else. */
+    private void greet(ServerPlayer p) {
+        if (coach.coached(p)) {
+            coach.notice(p, Onboarding.Lesson.WELCOME, now);
+            coach.notice(p, Onboarding.Lesson.OUTBREAK, now);
+            return;
+        }
+        p.sendSystemMessage(Component.literal("An Outbreak is building here. The longer you stay, the fiercer it gets and the more you carry out.").withStyle(ChatFormatting.GOLD));
+        p.sendSystemMessage(Component.literal("Loot is yours only once it is banked at a checkpoint or carried out through the extraction portal near the entrance.").withStyle(ChatFormatting.GRAY));
+        p.sendSystemMessage(Component.literal("Leaving has a price: beat the portal's gatekeeper, which grows with the Outbreak, or pay a toll of " + tollPercent + "% of your unbanked loot.").withStyle(ChatFormatting.GRAY));
+        if (tunnelMouth != null)
+            p.sendSystemMessage(Component.literal("A tunnel leads out of this room and down to the Depths: a maze that is different on every dive, with most of the chests.").withStyle(ChatFormatting.GRAY));
+    }
+
+    /** Notices what each player is close to or going through, so the tutorial can explain it the first time. */
+    private void lessonsTick(List<ServerPlayer> players) {
+        long left = host.run().deadline() == Long.MAX_VALUE ? Long.MAX_VALUE : host.run().deadline() - host.level().getServer().getTickCount();
+        for (ServerPlayer p : players) {
+            if (settled.contains(p.getUUID())) continue;
+            for (Enemy en : enemies.values())
+                if (en.mob.isAlive() && en.mob.distanceToSqr(p) < 14 * 14) { coach.notice(p, Onboarding.Lesson.ENEMIES, now); break; }
+            for (Feature f : features.values()) {
+                if (Math.abs(f.pos.getY() - p.getY()) > 5 || p.blockPosition().distSqr(f.pos) > 9 * 9) continue;
+                Onboarding.Lesson lesson = switch (f.kind) {
+                    case CHEST -> Onboarding.Lesson.CHESTS;
+                    case TIMER_CHEST -> Onboarding.Lesson.TIMER_CHEST;
+                    case OUTBREAK_CHEST -> Onboarding.Lesson.OUTBREAK_CHEST;
+                    case STRONGBOX -> Onboarding.Lesson.STRONGBOX;
+                    case ALTAR -> Onboarding.Lesson.ALTAR;
+                    case PORTAL -> Onboarding.Lesson.PORTAL;
+                    case DESCENT -> Onboarding.Lesson.TUNNEL;
+                    case RETURN -> null;
+                };
+                // The way out is explained when it matters: once the player is carrying something they could lose.
+                if (lesson == Onboarding.Lesson.PORTAL && !looted.containsKey(p.getUUID())) continue;
+                if (lesson != null) coach.notice(p, lesson, now);
+            }
+            if (p.getHealth() <= p.getMaxHealth() * 0.4f) coach.notice(p, Onboarding.Lesson.LOW_HEALTH, now);
+            if (left <= 6000) coach.notice(p, Onboarding.Lesson.TIME_SHORT, now);
+        }
+    }
+
+    /** Where the Guide bar points a new player for each goal. */
+    private Vec3 guideTarget(ServerPlayer p, Onboarding.Goal goal) {
+        boolean deep = below.contains(p.getUUID());
+        // The way between the dungeon and the Depths, from whichever end the player is at.
+        Vec3 down = tunnelMouth == null ? descentCentre : p.getY() < tunnelMouth.y - 2 || p.position().distanceToSqr(tunnelMouth) < 6 * 6 ? depthsDoor : tunnelMouth;
+        Vec3 up = tunnelMouth == null ? returnCentre : p.getY() < tunnelMouth.y - 2 && p.position().distanceToSqr(depthsDoor) > 8 * 8 ? depthsDoor : tunnelMouth;
+        switch (goal) {
+            // A chest on the player's own level; if there is none left there, the way to the other level.
+            case LOOT -> { Vec3 chest = nearestChest(p, deep, true); return chest != null ? chest : deep ? up : down; }
+            case DESCEND -> { return down; }
+            case DEEP_LOOT -> { return deep ? nearestChest(p, true, true) : down; }
+            case EXTRACT -> { return deep || (tunnelMouth != null && p.getY() < tunnelMouth.y - 2) ? up : portalCentre; }
+        }
+        return null;
+    }
+
+    /** The nearest chest this player has not looted that can be opened now, upstairs or down in the Depths. */
+    private Vec3 nearestChest(ServerPlayer p, boolean deep, boolean fresh) {
+        Set<BlockPos> mine = looted.getOrDefault(p.getUUID(), Set.of());
+        int timerStage = Jx.i(Jx.o(cfg, "features"), "timerStage", 2);
+        Feature best = null;
+        double bestD = Double.MAX_VALUE;
+        for (Feature f : features.values()) {
+            if (f.rarity == null || f.deep != deep || f.kind == FeaturePlanner.Kind.STRONGBOX) continue;
+            if (f.kind == FeaturePlanner.Kind.TIMER_CHEST && stage() < timerStage) continue;
+            if (fresh && mine.contains(f.pos)) continue;
+            double d = p.blockPosition().distSqr(f.pos);
+            if (d < bestD) { bestD = d; best = f; }
+        }
+        return best == null ? null : Vec3.atBottomCenterOf(best.pos);
     }
 
     private void stageRose(int stage) {
         String name = STAGE_NAMES[Math.min(stage, STAGE_NAMES.length - 1)];
         host.say("The Outbreak grows: stage " + stage + ", " + name + ". Surviving it adds to your haul.", ChatFormatting.GOLD);
         haul.addShared(present(), Haul.Kind.ARENA_WIN, 1);
+        for (ServerPlayer p : unsettled(host.players())) coach.notice(p, Onboarding.Lesson.STAGE, now);
         host.zoneTier(tier());
         for (ServerPlayer p : host.players()) host.level().playSound(null, p.blockPosition(), SoundEvents.ELDER_GUARDIAN_CURSE, SoundSource.HOSTILE, 0.5f, 0.8f + 0.1f * stage);
         if (stage == Jx.i(Jx.o(cfg, "features"), "timerStage", 2))
@@ -428,6 +522,7 @@ public final class OutbreakDive {
             int cleared = RunLoot.clearAll(p, runId());
             Haul.Settlement s = haul.settle(p.getUUID(), Haul.Exit.DIED);
             p.sendSystemMessage(Component.literal(what + ": your haul is banked (" + describe(s) + (cleared > 0 ? ", " + cleared + " item stack(s) secured" : "") + ").").withStyle(ChatFormatting.GREEN));
+            coach.notice(p, Onboarding.Lesson.CHECKPOINT, now);
             host.level().playSound(null, p.blockPosition(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 0.6f, 1.4f);
         }
         AscensionDungeonsLog.LOG.info("[dive] run {} checkpoint: {}", runId(), what);
@@ -443,7 +538,12 @@ public final class OutbreakDive {
 
     /** Lootr rolled a chest for this player. */
     void chestLooted(ServerPlayer player, BlockPos pos) {
-        if (!closed && !settled.contains(player.getUUID())) haul.add(player.getUUID(), Haul.Kind.CHEST, 1);
+        if (closed || settled.contains(player.getUUID())) return;
+        haul.add(player.getUUID(), Haul.Kind.CHEST, 1);
+        looted.computeIfAbsent(player.getUUID(), k -> new HashSet<>()).add(pos.immutable());
+        Feature f = features.get(pos);
+        coach.notice(player, Onboarding.Lesson.UNBANKED, now);
+        coach.lootedChest(player, f != null ? f.deep : below.contains(player.getUUID()));
     }
 
     private static String describe(Haul.Settlement s) {
@@ -500,6 +600,11 @@ public final class OutbreakDive {
                 case LEFT -> "You left without extracting. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
             };
             online.sendSystemMessage(Component.literal(text).withStyle(kept ? ChatFormatting.GREEN : ChatFormatting.RED));
+            switch (exit) {
+                case EXTRACTED -> coach.extracted(online, tolled.contains(player), now);
+                case DIED -> coach.knockedOut(online, now);
+                default -> coach.leave(online);
+            }
         }
         AscensionDungeonsLog.LOG.info("[dive] run {} settled {} exit={} arenaWins={} boss={} chests={} tier={} loot {} {} stack(s){}", runId(), player, exit,
                 s.arenaWins(), s.bossDefeated(), s.chests(), tier, kept ? "kept" : "stripped", stacks, online == null ? " (offline: swept on next login)" : "");
@@ -508,6 +613,7 @@ public final class OutbreakDive {
     /** The run is over. Whoever is still inside leaves with everything if the boss fell, otherwise with what they banked. */
     void close() {
         if (closed) return;
+        coach.close();
         for (Map.Entry<UUID, Run.Member> e : host.run().members().entrySet()) {
             if (settled.contains(e.getKey())) continue;
             settle(e.getKey(), e.getValue().presence() == Run.Presence.LEFT ? Haul.Exit.LEFT : bossDown ? Haul.Exit.EXTRACTED : Haul.Exit.TIMED_OUT);
@@ -780,6 +886,7 @@ public final class OutbreakDive {
                 o.plan().itemsLost(), hidden, wins, stage());
         p.sendSystemMessage(Component.literal("Toll paid: " + o.plan().itemsLost() + " item(s)" + (hidden > 0 ? ", " + hidden + " hidden stack(s)" : "")
                 + (wins > 0 ? " and " + wins + " win(s)" : "") + " lost.").withStyle(ChatFormatting.RED));
+        tolled.add(p.getUUID());
         extract(p);
     }
 
@@ -792,6 +899,7 @@ public final class OutbreakDive {
             return;
         }
         host.say(p.getGameProfile().getName() + " calls out the gatekeeper! Beat it and the portal opens for everyone.", ChatFormatting.GOLD);
+        for (ServerPlayer other : unsettled(host.players())) coach.notice(other, Onboarding.Lesson.GATEKEEPER, now);
         sound(BlockPos.containing(portalCentre), SoundEvents.WITHER_SPAWN, 0.6f, 1.0f);
     }
 
@@ -877,7 +985,11 @@ public final class OutbreakDive {
                             p.displayClientMessage(Component.literal(en.mob.getName().getString() + " is casting " + en.spell.name() + "!").withStyle(ChatFormatting.AQUA), true);
                 }
             } else if (phase == Spell.Cast.Phase.WARNING) {
-                if (now % 4 == 0) ring(en.castCentre, en.spell.radius(), new DustParticleOptions(rgb(spellColours.getOrDefault(en.spell.id(), 0x33D9FF)), 1.2f));
+                if (now % 4 == 0) {
+                    ring(en.castCentre, en.spell.radius(), new DustParticleOptions(rgb(spellColours.getOrDefault(en.spell.id(), 0x33D9FF)), 1.2f));
+                    double near = en.spell.radius() + 8;
+                    for (ServerPlayer p : players) if (!settled.contains(p.getUUID()) && p.position().distanceToSqr(en.castCentre) < near * near) coach.notice(p, Onboarding.Lesson.SPELLS, now);
+                }
             } else {
                 land(en, players);
                 en.cast.finish();

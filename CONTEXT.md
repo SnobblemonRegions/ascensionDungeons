@@ -71,6 +71,24 @@ _Avoid_: death, wipe.
 **Run mark**: The custom-data tag (`ascension_run`) on an item looted in a dive that has not been banked. A failed exit removes marked items.
 _Avoid_: soulbound, bound (AscensionLib uses "bound" for untradable wallet materials).
 
+## The tutorial
+
+**Tutorial**: What a player who has never extracted is taught during their dives: lessons and the Guide bar. Per player.
+_Avoid_: onboarding in player-facing text.
+
+**Lesson**: One thing the tutorial explains, told once per player the first time it happens to them.
+_Avoid_: tip for the opening ones, hint.
+
+**Guide bar**: The pink bar that shows a new player's next goal, which way it is and how far.
+
+**Goal**: What the Guide bar asks for next: open a chest, go down, loot in the Depths, get out.
+_Avoid_: quest, objective, mission.
+
+**Graduate**: A player who has left through the portal at least once. They have no Guide bar.
+_Avoid_: veteran in code (it says nothing about how).
+
+**Dive guide**: The window `/dungeon guide` opens: every lesson as an item to read.
+
 ## Enemies
 
 **Enemy**: A hostile creature the dive spawned. With Cobblemon it is a Pokémon from the dungeon's pools, fighting in real time, uncatchable and not battleable turn-based.
