@@ -59,15 +59,41 @@ class DepthsTest {
                 if (!edge || !d.open(x, y, z)) continue;
                 open++;
                 assertEquals(0, z, "the only opening is in the near wall");
-                assertTrue(Math.abs(x - cx) <= 1 && y >= Depths.STAND && y < Depths.STAND + 4, "and it is the doorway: " + x + "," + y + "," + z);
+                assertTrue(Math.abs(x - cx) <= 2 && y >= Depths.STAND && y < Depths.STAND + 6, "and it is the doorway: " + x + "," + y + "," + z);
             }
-            assertEquals(12, open, "a doorway three wide and four high");
+            assertEquals(30, open, "a doorway five wide and six high");
+            assertEquals(2, d.doorHalf());
             // the doorway leads on foot to the entrance room and so to everything
             assertTrue(d.open(cx, Depths.STAND, 0) && !d.open(cx, Depths.STAND - 1, 0));
             int[] w = d.walkability();
             assertEquals(w[0], w[1], "seed " + seed);
         }
         assertFalse(Depths.generate(1, P).hasDoor());
+        assertEquals(-1, Depths.generate(1, P).doorHalf());
+        // a narrow maze has a narrow doorway
+        Depths narrow = Depths.generate(1, new Depths.Params(7, 7, 24, 0.75, 0.35, 3), true);
+        assertEquals(1, narrow.doorHalf());
+        assertTrue(narrow.open(Depths.doorX(P) + 1, Depths.STAND + 3, 0) && !narrow.open(Depths.doorX(P) + 2, Depths.STAND, 0) && !narrow.open(Depths.doorX(P), Depths.STAND + 4, 0));
+        assertThrows(IllegalArgumentException.class, () -> new Depths.Params(7, 7, 24, 0.75, 0.35, 4));
+    }
+
+    /** The point of wide passages: the biggest Pokémon in the pools (2.7 wide, 5.1 tall) can reach every room. */
+    @Test
+    void aBodyThreeWideAndSixTallReachesEveryRoom() {
+        for (long seed = 1; seed <= 60; seed++) {
+            Depths d = Depths.generate(seed, P, true);
+            BigBody.Space space = d::open;
+            for (Depths.Room room : d.rooms()) {
+                int steps = BigBody.walk(space, d.entrance(), at -> at[0] >= room.min()[0] && at[0] <= room.max()[0] && at[2] >= room.min()[2] && at[2] <= room.max()[2], 6);
+                assertTrue(steps >= 0, "seed " + seed + ": a big body reaches " + room.kind() + " room " + room.id());
+            }
+            // ... and gets out through the doorway
+            assertTrue(BigBody.walk(space, d.entrance(), at -> at[2] == 1, 6) > 0, "seed " + seed + ": and the doorway");
+        }
+        // In a narrow maze it cannot leave the entrance room.
+        Depths narrow = Depths.generate(3, new Depths.Params(7, 7, 24, 0.75, 0.35, 3), true);
+        Depths.Room far = narrow.rooms().get(narrow.rooms().size() - 1);
+        assertEquals(-1, BigBody.walk(narrow::open, narrow.entrance(), at -> at[0] >= far.min()[0] && at[0] <= far.max()[0] && at[2] >= far.min()[2] && at[2] <= far.max()[2], 6));
     }
 
     @Test

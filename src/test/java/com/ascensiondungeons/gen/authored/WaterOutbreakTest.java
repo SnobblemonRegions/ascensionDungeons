@@ -144,8 +144,8 @@ class WaterOutbreakTest {
         for (String id : TYPES) {
             AuthoredLayout layout = AuthoredLayout.get(id);
             DepthsLink link = layout.link();
-            report.append(String.format("%-9s %s%n", id, link.physical() ? link.side() + ", tunnel " + link.tunnelLength() + " blocks, mouth " + Arrays.toString(link.mouth())
-                    : "DETACHED (teleporting stairway)"));
+            report.append(String.format("%-9s %s%n", id, link.physical() ? link.side() + ", tunnel " + link.tunnelLength() + " blocks long, " + link.width() + " wide, "
+                    + link.clearHeight() + " high, mouth " + Arrays.toString(link.mouth()) : "DETACHED (teleporting stairway)"));
             if (!link.physical()) continue;
             assertSame(link, layout.link(), id + ": the way down is in the same place every run");
             int[] m = link.mouth();
@@ -167,6 +167,41 @@ class WaterOutbreakTest {
         }
         System.out.print(report);
         assertFalse(report.toString().contains("DETACHED"), "every type dungeon has a real way down:\n" + report);
+    }
+
+    /**
+     * Wide enough for the big ones: in every type dungeon a body three blocks square gets from the tunnel to the maze's first
+     * room and on to its farthest. Six tall (a Golurk) on the stairway and in the maze; in the tunnel, as tall as that dungeon's
+     * wall allowed, which the report shows.
+     */
+    @Test
+    void theWayDownIsWideEnoughForTheLargestPokemon() {
+        StringBuilder low = new StringBuilder();
+        for (String id : TYPES) {
+            AuthoredLayout layout = AuthoredLayout.get(id);
+            DepthsLink link = layout.link();
+            assertEquals(5, link.width(), id + ": the tunnel is five wide");
+            assertTrue(link.tunnelLength() >= 2, id);
+            if (link.clearHeight() < 6) low.append(id).append(" tunnel is ").append(link.clearHeight()).append(" high; ");
+            for (long seed = 1; seed <= 4; seed++) {
+                final long run = seed;
+                var depths = layout.depths(seed);
+                assertEquals(2, depths.doorHalf(), id + ": the maze's doorway matches");
+                com.ascensiondungeons.gen.depths.BigBody.Space space = (x, y, z) -> layout.passable(run, x, y, z);
+                int[] e = depths.entrance(), goal = link.toSchem(e[0], e[1], e[2]);
+                var rooms = depths.rooms();
+                AuthoredLayout.Room far = null;
+                for (AuthoredLayout.Room r : layout.rooms(seed)) if (r.id.equals(rooms.get(rooms.size() - 1).id())) far = r;
+                final AuthoredLayout.Room last = far;
+                // through the tunnel, as tall as the tunnel is
+                int inTunnel = com.ascensiondungeons.gen.depths.BigBody.walk(space, link.stair(-2), at -> at[0] == goal[0] && at[2] == goal[2], Math.min(6, link.clearHeight()));
+                assertTrue(inTunnel > 0, id + " seed " + seed + ": a three-wide body gets from the tunnel to the Depths");
+                // from the head of the stairway on, six tall, all the way to the farthest room
+                int deep = com.ascensiondungeons.gen.depths.BigBody.walk(space, link.stair(2), at -> last.contains(at[0], at[1], at[2]), 6);
+                assertTrue(deep > 0, id + " seed " + seed + ": a body three wide and six tall gets down the stairway and to the farthest room");
+            }
+        }
+        System.out.println("tunnel heights below six: " + (low.length() == 0 ? "none" : low));
     }
 
     /**

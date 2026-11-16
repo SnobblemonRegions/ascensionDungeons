@@ -31,9 +31,14 @@ public final class Depths {
      * @param cell      blocks per cell side (a room and half of each passage live in a cell)
      * @param occupancy share of the grid that holds a room, 0..1
      * @param loops     chance that two neighbouring rooms not already joined get an extra passage, 0..1
+     * @param passage   how wide the passages between rooms are: 5 (six high, room for the largest Pokémon) or 3 (four high)
      */
-    public record Params(int gridW, int gridH, int cell, double occupancy, double loops) {
+    public record Params(int gridW, int gridH, int cell, double occupancy, double loops, int passage) {
+        /** Wide passages, the default. */
+        public Params(int gridW, int gridH, int cell, double occupancy, double loops) { this(gridW, gridH, cell, occupancy, loops, 5); }
+
         public Params {
+            if (passage != 3 && passage != 5) throw new IllegalArgumentException("a passage is 3 or 5 blocks wide");
             if (gridW < 2 || gridH < 2 || gridW > 16 || gridH > 16) throw new IllegalArgumentException("the grid must be 2..16 cells each way");
             if (cell < 20 || cell > 48) throw new IllegalArgumentException("a cell must be 20..48 blocks");
             if (occupancy <= 0 || occupancy > 1) throw new IllegalArgumentException("occupancy must be in (0, 1]");
@@ -76,6 +81,10 @@ public final class Depths {
     public boolean open(int x, int y, int z) { byte r = role(x, y, z); return r == AIR || r == LIGHT; }
 
     private boolean door;
+    private int doorHalf = -1;
+
+    /** Half the doorway's width (2 for a five-wide one), or -1 when there is none. */
+    public int doorHalf() { return doorHalf; }
 
     /** Whether the slab has a doorway in its near wall. */
     public boolean hasDoor() { return door; }
@@ -97,13 +106,21 @@ public final class Depths {
 
     // ---- generation ----------------------------------------------------------------------------------------------
 
-    public static Depths generate(long seed, Params p) { return generate(seed, p, false); }
+    public static Depths generate(long seed, Params p) { return generate(seed, p, -1); }
+
+    /** As {@link #generate(long, Params, int)}, with a doorway as wide as the maze's own passages when {@code door} is true. */
+    public static Depths generate(long seed, Params p, boolean door) { return generate(seed, p, door ? p.passage() / 2 : -1); }
+
+    /** How high a passage (or a doorway) of this half-width is: wide ones are six high, narrow ones four. */
+    public static int passageHeight(int half) { return half >= 2 ? 6 : 4; }
 
     /**
-     * @param door when true the entrance room is opened to the slab's near edge (z = 0) with a passage three wide, so a tunnel
-     *             from outside can walk straight in. The opening is {@link #doorX} wide at {@code z = 0}, standing level {@link #STAND}.
+     * @param doorHalf when not negative the entrance room is opened to the slab's near edge (z = 0) with a passage
+     *                 {@code 2 * doorHalf + 1} wide, so a tunnel from outside can walk straight in. The opening is centred on
+     *                 {@link #doorX} at {@code z = 0}, standing level {@link #STAND}.
      */
-    public static Depths generate(long seed, Params p, boolean door) {
+    public static Depths generate(long seed, Params p, int doorHalf) {
+        boolean door = doorHalf >= 0;
         Random rng = new Random(seed ^ 0x4445505448534CL);
         Depths d = new Depths(p);
         int w = p.gridW(), h = p.gridH();
@@ -165,12 +182,13 @@ public final class Depths {
         if (door) {
             // The way in: from the entrance room's middle out through the slab's near wall.
             int cx = start * p.cell() + mid;
-            for (int x = cx - 1; x <= cx + 1; x++)
+            for (int x = cx - doorHalf; x <= cx + doorHalf; x++)
                 for (int z = 0; z <= mid; z++) {
                     d.setRaw(x, 1, z, FLOOR);
-                    for (int y = STAND; y < STAND + 4; y++) d.setRaw(x, y, z, AIR);
+                    for (int y = STAND; y < STAND + passageHeight(doorHalf); y++) d.setRaw(x, y, z, AIR);
                 }
             d.door = true;
+            d.doorHalf = doorHalf;
         }
         // 5. Prove it: every room must be reachable. A shape that walls itself off is replaced by an open hall.
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -219,14 +237,14 @@ public final class Depths {
         return out;
     }
 
-    /** A passage three wide and four high between two neighbouring cells, centre to centre. */
+    /** A passage between two neighbouring cells, centre to centre: five wide and six high, or three and four. */
     private void carvePassage(int ax, int az, int bx, int bz) {
-        int c = params.cell(), mid = c / 2;
+        int c = params.cell(), mid = c / 2, half = params.passage() / 2, high = passageHeight(half);
         int x1 = Math.min(ax, bx) * c + mid, x2 = Math.max(ax, bx) * c + mid, z1 = Math.min(az, bz) * c + mid, z2 = Math.max(az, bz) * c + mid;
-        for (int x = x1 - 1; x <= x2 + 1; x++)
-            for (int z = z1 - 1; z <= z2 + 1; z++) {
+        for (int x = x1 - half; x <= x2 + half; x++)
+            for (int z = z1 - half; z <= z2 + half; z++) {
                 set(x, 1, z, FLOOR);
-                for (int y = STAND; y < STAND + 4; y++) set(x, y, z, AIR);
+                for (int y = STAND; y < STAND + high; y++) set(x, y, z, AIR);
             }
     }
 
@@ -259,19 +277,20 @@ public final class Depths {
             }
             case PILLARS -> {
                 box(cx - half, cz - half, cx + half, cz + half, 6);
-                for (int dx = -half + 2; dx <= half - 2; dx += 3)
-                    for (int dz = -half + 2; dz <= half - 2; dz += 3)
-                        if (Math.abs(dx) > 1 && Math.abs(dz) > 1) column(cx + dx, cz + dz, 1, 6, PILLAR);
+                // Pillars every third block, but never on the five-wide lanes through the middle.
+                for (int ax = 3; ax <= half - 2; ax += 3)
+                    for (int az = 3; az <= half - 2; az += 3)
+                        for (int sx : new int[] {-1, 1}) for (int sz : new int[] {-1, 1}) column(cx + sx * ax, cz + sz * az, 1, 6, PILLAR);
             }
             case CROSS -> {
                 int arm = half + 1;
-                box(cx - arm, cz - 2, cx + arm, cz + 2, 5);
-                box(cx - 2, cz - arm, cx + 2, cz + arm, 5);
+                box(cx - arm, cz - 2, cx + arm, cz + 2, 6);
+                box(cx - 2, cz - arm, cx + 2, cz + arm, 6);
                 box(cx - 4, cz - 4, cx + 4, cz + 4, 7);
             }
             case RING -> {
                 box(cx - half, cz - half, cx + half, cz + half, 6);
-                int core = half - 4;
+                int core = Math.max(1, half - 5);               // a walkway five wide all the way round
                 for (int x = cx - core; x <= cx + core; x++) for (int z = cz - core; z <= cz + core; z++) {
                     boolean rim = x == cx - core || x == cx + core || z == cz - core || z == cz + core;
                     for (int y = STAND; y < STAND + 6; y++) set(x, y, z, rim ? PILLAR : WALL);
@@ -280,10 +299,10 @@ public final class Depths {
             case AISLES -> {
                 box(cx - half, cz - half, cx + half, cz + half, 6);
                 boolean alongX = rng.nextBoolean();
-                for (int o = -half + 3; o <= half - 3; o += 4) {
-                    if (Math.abs(o) <= 1) continue;
+                // Two walls make three aisles; each wall has five-wide gaps in the middle and at both ends.
+                for (int o : new int[] {-4, 4}) {
                     for (int t = -half + 1; t <= half - 1; t++) {
-                        if (Math.abs(t) <= 1 || Math.abs(Math.abs(t) - (half - 2)) <= 1) continue;    // gaps in the middle and near both ends
+                        if (Math.abs(t) <= 2 || Math.abs(t) >= half - 4) continue;
                         for (int y = STAND; y < STAND + 6; y++) set(alongX ? cx + t : cx + o, y, alongX ? cz + o : cz + t, WALL);
                     }
                 }
@@ -294,7 +313,7 @@ public final class Depths {
                 for (int sx : new int[] {-1, 1}) for (int sz : new int[] {-1, 1}) column(cx + sx * 5, cz + sz * 5, 1, 7, PILLAR);
             }
             case VAULT -> {
-                box(cx - 5, cz - 5, cx + 5, cz + 5, 5);
+                box(cx - 5, cz - 5, cx + 5, cz + 5, 6);
                 for (int x = cx - 4; x <= cx + 4; x++) for (int z = cz - 4; z <= cz + 4; z++) if ((x + z) % 2 == 0) set(x, 1, z, ACCENT);
             }
         }

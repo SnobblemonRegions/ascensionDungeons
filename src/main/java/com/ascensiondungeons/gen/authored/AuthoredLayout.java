@@ -135,7 +135,8 @@ public final class AuthoredLayout {
 
     private com.ascensiondungeons.gen.depths.Depths.Params depthsParams() {
         JsonObject p = Jx.o(outbreak, "depths");
-        return new com.ascensiondungeons.gen.depths.Depths.Params(Jx.i(p, "gridW", 7), Jx.i(p, "gridH", 7), Jx.i(p, "cell", 24), Jx.d(p, "occupancy", 0.75), Jx.d(p, "loops", 0.35));
+        return new com.ascensiondungeons.gen.depths.Depths.Params(Jx.i(p, "gridW", 7), Jx.i(p, "gridH", 7), Jx.i(p, "cell", 24), Jx.d(p, "occupancy", 0.75), Jx.d(p, "loops", 0.35),
+                Jx.i(p, "passage", 5));
     }
 
     /**
@@ -166,8 +167,11 @@ public final class AuthoredLayout {
         java.util.List<int[]> starts = new java.util.ArrayList<>();
         starts.add(data.entry);
         starts.addAll(java.util.Arrays.asList(home.spawnCells));
-        link = com.ascensiondungeons.gen.depths.DepthsLink.find(grid, starts, c -> sealBlocks.containsKey(key(c[0], c[1], c[2])) || reserved(c, boxes, points),
-                c -> home.contains(c[0], c[1], c[2]), data.entry, sizeX, sizeZ, doorX);
+        java.util.function.Predicate<int[]> keep = c -> sealBlocks.containsKey(key(c[0], c[1], c[2])) || reserved(c, boxes, points);
+        java.util.function.Predicate<int[]> own = c -> home.contains(c[0], c[1], c[2]);
+        // As wide and as high as this dungeon's wall can take (five by six fits every Pokémon); "passage": 3 keeps it narrow.
+        link = p.passage() >= 5 ? com.ascensiondungeons.gen.depths.DepthsLink.findWidest(grid, starts, keep, own, data.entry, sizeX, sizeZ, doorX)
+                : com.ascensiondungeons.gen.depths.DepthsLink.find(grid, starts, keep, own, data.entry, sizeX, sizeZ, doorX);
         return link;
     }
 
@@ -184,7 +188,7 @@ public final class AuthoredLayout {
         com.ascensiondungeons.gen.depths.Depths d = depthsCache.get(seed);
         if (d == null) {
             // A maze joined by a tunnel has a doorway in its near wall; a detached one is sealed.
-            d = com.ascensiondungeons.gen.depths.Depths.generate(seed, depthsParams(), link().physical());
+            d = com.ascensiondungeons.gen.depths.Depths.generate(seed, depthsParams(), link().physical() ? link().halfWidth() : -1);
             depthsCache.put(seed, d);
             if (depthsCache.size() > 6) {                       // a handful of live runs at most
                 Long oldest = depthsCache.keySet().iterator().next();
@@ -385,7 +389,8 @@ public final class AuthoredLayout {
             if (joined != null && joined.physical()) {
                 // Keep the way down clear: nothing is placed at the tunnel's mouth or just inside the maze's door.
                 int[] m = joined.mouth();
-                for (int a = -2; a <= 2; a++) for (int b = -2; b <= 2; b++) points.add(new int[] {m[0] + a, m[1], m[2] + b});
+                int keepClear = joined.halfWidth() + 1;
+                for (int a = -keepClear; a <= keepClear; a++) for (int b = -keepClear; b <= keepClear; b++) points.add(new int[] {m[0] + a, m[1], m[2] + b});
             }
             Set<String> bossRooms = new HashSet<>();
             for (JsonElement b : data.bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));

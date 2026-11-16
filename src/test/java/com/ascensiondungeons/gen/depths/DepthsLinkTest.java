@@ -63,8 +63,62 @@ class DepthsLinkTest {
             assertTrue(open(link, x, y, 20) && open(link, x, y + 1, 20) && open(link, x, y + 2, 20), "step " + t);
             assertEquals(Depths.FLOOR, link.override(x, y - 1, 20), "floor under step " + t);
             assertEquals(Depths.WALL, link.override(x, y, 22), "wall beside step " + t);
-            assertEquals(Depths.WALL, link.override(x, y + 4, 20), "roof over step " + t);
+            assertEquals(Depths.WALL, link.override(x, y + link.stairHeight(), 20), "roof over step " + t);
         }
+        assertEquals(5, link.stairHeight(), "a narrow stairway is five high");
+        assertEquals(3, link.width());
+        assertEquals(3, link.clearHeight());
+    }
+
+    private static DepthsLink wide(Box g, int[] start) { return DepthsLink.findWidest(g, List.of(start), c -> false, c -> false, null, SIZE, SIZE, DOOR); }
+
+    @Test
+    void theWidestTunnelTheWallCanTakeIsCut() {
+        // The room is five high (y 5..9) under ten blocks of stone, so a six-high tunnel fits beside it.
+        Box g = new Box();
+        g.room(8, 10, 20, 30);
+        DepthsLink link = wide(g, new int[] {12, 5, 20});
+        assertTrue(link.physical());
+        assertEquals(5, link.width());
+        assertEquals(6, link.clearHeight());
+        assertEquals(7, link.stairHeight(), "the stairway is a block higher than the tunnel");
+        // five wide and six high inside the dungeon, with the dungeon's own stone left round it
+        for (int z = 18; z <= 22; z++) for (int y = 5; y <= 10; y++) assertTrue(open(link, 3, y, z), "tunnel " + y + " " + z);
+        assertNull(link.override(3, 5, 23));
+        assertNull(link.override(3, 5, 17));
+        assertNull(link.override(3, 11, 20));
+        // the stairway outside is five wide too, with a slab the whole width at each drop
+        for (int z = 18; z <= 22; z++) assertEquals(DepthsLink.STEP, link.override(-3, 4, z));
+        assertEquals(Depths.WALL, link.override(-3, 4, 23));
+        // a big body walks it from the tunnel to the stairway's foot
+        BigBody.Space space = (x, y, z) -> { Byte r = link.override(x, y, z); return r != null ? DepthsLink.open(r) : inside(g, x, y, z) && g.state(x, y, z).equals("minecraft:air"); };
+        int[] foot = link.stair(DepthsLink.GAP - 2);
+        assertTrue(BigBody.walk(space, link.stair(-2), at -> at[0] == foot[0] && at[2] == foot[2], 6) > 0, "three wide and six tall gets down the stairs");
+    }
+
+    private static boolean inside(Box g, int x, int y, int z) { return x >= 0 && y >= 0 && z >= 0 && x < g.width() && y < g.height() && z < g.length(); }
+
+    @Test
+    void aLowOrCrowdedWallGetsALowerOrNarrowerTunnel() {
+        // Water three blocks above the floor on the only reachable wall: six, five and four high are refused, three is not.
+        Box low = new Box();
+        low.room(8, 10, 20, 30);
+        for (int x = 0; x < 8; x++) for (int z = 0; z < 40; z++) low.set(x, 9, z, "minecraft:water");
+        for (int x = 0; x < 60; x++) for (int z = 0; z < 40; z++) if (z < 4 || z > 36 || x > 50) for (int y = 0; y < 20; y++) low.set(x, y, z, "minecraft:water");
+        DepthsLink a = wide(low, new int[] {12, 5, 20});
+        assertTrue(a.physical());
+        assertEquals(DepthsLink.Side.WEST, a.side());
+        assertEquals(5, a.width());
+        assertEquals(3, a.clearHeight(), "only three blocks of wall under the water (a block is kept between): " + java.util.Arrays.toString(a.mouth()) + " " + a.side() + " len " + a.tunnelLength());
+        // Another room close beside the way out on both sides: five wide would break into it, three wide fits.
+        Box tight = new Box();
+        tight.room(8, 18, 20, 22);
+        for (int y = 5; y <= 9; y++) for (int x = 1; x <= 6; x++) { tight.set(x, y, 17, "minecraft:air"); tight.set(x, y, 23, "minecraft:air"); }
+        for (int x = 0; x < 60; x++) for (int z = 0; z < 40; z++) if (z < 4 || z > 36 || x > 50) for (int y = 0; y < 20; y++) tight.set(x, y, z, "minecraft:water");
+        DepthsLink b = wide(tight, new int[] {12, 5, 20});
+        assertTrue(b.physical());
+        assertEquals(3, b.width());
+        assertThrows(IllegalArgumentException.class, () -> DepthsLink.find(tight, List.of(new int[] {12, 5, 20}), c -> false, c -> false, null, SIZE, SIZE, DOOR, 3, 3));
     }
 
     private static boolean open(DepthsLink link, int x, int y, int z) { Byte r = link.override(x, y, z); return r != null && DepthsLink.open(r); }

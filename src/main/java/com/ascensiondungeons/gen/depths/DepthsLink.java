@@ -62,9 +62,14 @@ public final class DepthsLink {
     /** The first cell on the centre line outside the dungeon's bounds, at standing level. */
     private final int ex, ey, ez;
     private final int yBase, doorX, depthsX, depthsZ;
+    /** Half the width of the tunnel and stairway (2 means five wide), and how high the tunnel is inside the dungeon. */
+    private final int half, clear;
     private final Map<Long, Byte> overrides;
 
-    private DepthsLink(boolean physical, Side side, int[] mouth, int tunnel, int ex, int ey, int ez, int yBase, int doorX, int depthsX, int depthsZ, Map<Long, Byte> overrides) {
+    private DepthsLink(boolean physical, Side side, int[] mouth, int tunnel, int ex, int ey, int ez, int yBase, int doorX, int depthsX, int depthsZ, int half, int clear,
+                       Map<Long, Byte> overrides) {
+        this.half = half;
+        this.clear = clear;
         this.physical = physical;
         this.side = side;
         this.mouth = mouth;
@@ -85,6 +90,18 @@ public final class DepthsLink {
     public int[] mouth() { return mouth == null ? null : mouth.clone(); }
     /** Blocks of tunnel cut inside the dungeon. */
     public int tunnelLength() { return tunnel; }
+    /** Half the width of the way down: 2 for five wide, 1 for three. The maze's doorway is the same width. */
+    public int halfWidth() { return half; }
+    /** How wide the tunnel and the stairway are. */
+    public int width() { return 2 * half + 1; }
+    /** How high the tunnel is where it runs inside the dungeon (as high as the wall allowed, up to six). */
+    public int clearHeight() { return clear; }
+    /**
+     * How high the stairway is. It is built outside the dungeon, so it never depends on the dungeon's wall: one more than a
+     * passage of its width, because a long body coming down still rests on the tread behind it as its head passes under the
+     * roof of the tread in front.
+     */
+    public int stairHeight() { return Depths.passageHeight(half) + 1; }
 
     // ---- where the maze is ---------------------------------------------------------------------------------------
 
@@ -127,7 +144,7 @@ public final class DepthsLink {
 
     /** The Depths placed beyond the dungeon's far (south) face with nothing joining them. */
     public static DepthsLink detached(Grid g, int depthsX, int depthsZ, int doorX) {
-        return new DepthsLink(false, Side.SOUTH, null, 0, doorX, Depths.STAND + 2, g.length() + DETACHED_GAP - GAP, 2, doorX, depthsX, depthsZ, Map.of());
+        return new DepthsLink(false, Side.SOUTH, null, 0, doorX, Depths.STAND + 2, g.length() + DETACHED_GAP - GAP, 2, doorX, depthsX, depthsZ, 1, 3, Map.of());
     }
 
     /**
@@ -148,6 +165,31 @@ public final class DepthsLink {
      *             beside the room's own air; once the tunnel is in solid wall it may not meet any air again
      */
     public static DepthsLink find(Grid g, List<int[]> starts, Predicate<int[]> reserved, Predicate<int[]> home, int[] avoid, int depthsX, int depthsZ, int doorX) {
+        return find(g, starts, reserved, home, avoid, depthsX, depthsZ, doorX, 1, 3);
+    }
+
+    /** Sizes tried by {@link #findWidest}, best first, as {half width, height}: five wide and six to three high, then three wide. */
+    static final int[][] SIZES = {{2, 6}, {2, 5}, {2, 4}, {2, 3}, {1, 3}};
+
+    /**
+     * The widest and highest tunnel the dungeon's wall can take: five wide and six high lets every Pokémon through, and each
+     * smaller size is tried only when the one before has no safe place anywhere in the entrance room.
+     */
+    public static DepthsLink findWidest(Grid g, List<int[]> starts, Predicate<int[]> reserved, Predicate<int[]> home, int[] avoid, int depthsX, int depthsZ, int doorX) {
+        for (int[] size : SIZES) {
+            DepthsLink link = find(g, starts, reserved, home, avoid, depthsX, depthsZ, doorX, size[0], size[1]);
+            if (link.physical()) return link;
+        }
+        return detached(g, depthsX, depthsZ, doorX);
+    }
+
+    /**
+     * @param half  half the tunnel's width: 1 for three wide, 2 for five
+     * @param clear how high the tunnel is inside the dungeon, 3 to 6
+     */
+    public static DepthsLink find(Grid g, List<int[]> starts, Predicate<int[]> reserved, Predicate<int[]> home, int[] avoid, int depthsX, int depthsZ, int doorX,
+                                  int half, int clear) {
+        if (half < 1 || half > 2 || clear < 3 || clear > 6) throw new IllegalArgumentException("a tunnel is 3 or 5 wide and 3 to 6 high");
         boolean[] exterior = exterior(g);
         int[] bestMouth = null;
         Side bestSide = null;
@@ -156,7 +198,7 @@ public final class DepthsLink {
             for (Side side : Side.values()) {
                 int[] mouth = walkToWall(g, start, side);
                 if (mouth == null) continue;
-                int len = tunnelLength(g, exterior, reserved, home, mouth, side);
+                int len = tunnelLength(g, exterior, reserved, home, mouth, side, half, clear);
                 if (len < 0) continue;
                 int score = len;
                 if (avoid != null) {
@@ -169,7 +211,7 @@ public final class DepthsLink {
         }
         if (bestMouth == null) return detached(g, depthsX, depthsZ, doorX);
         int ex = bestMouth[0] + bestSide.dx * (bestLen + 1), ez = bestMouth[2] + bestSide.dz * (bestLen + 1), ey = bestMouth[1];
-        DepthsLink link = new DepthsLink(true, bestSide, bestMouth, bestLen, ex, ey, ez, ey - DROP - Depths.STAND, doorX, depthsX, depthsZ, new HashMap<>());
+        DepthsLink link = new DepthsLink(true, bestSide, bestMouth, bestLen, ex, ey, ez, ey - DROP - Depths.STAND, doorX, depthsX, depthsZ, half, clear, new HashMap<>());
         link.build(g, exterior);
         return link;
     }
@@ -239,9 +281,9 @@ public final class DepthsLink {
 
     /**
      * How many blocks of tunnel it takes to get from the mouth out of the dungeon's bounds, or a negative reason if a tunnel there would touch
-     * something it must not. The tunnel is three wide and three high; the ring of blocks round it must stay closed.
+     * something it must not. The tunnel is {@code 2 * half + 1} wide and {@code clear} high; the ring of blocks round it must stay closed.
      */
-    static int tunnelLength(Grid g, boolean[] exterior, Predicate<int[]> reserved, Predicate<int[]> home, int[] mouth, Side side) {
+    static int tunnelLength(Grid g, boolean[] exterior, Predicate<int[]> reserved, Predicate<int[]> home, int[] mouth, Side side, int half, int clear) {
         int w = g.width(), l = g.length(), y = mouth[1];
         int px = side.dz != 0 ? 1 : 0, pz = side.dz != 0 ? 0 : 1;
         int solidSections = 0;
@@ -249,10 +291,10 @@ public final class DepthsLink {
             int cx = mouth[0] + side.dx * t, cz = mouth[2] + side.dz * t;
             if (!in(g, cx, y, cz)) return solidSections >= 1 ? t - 1 : -1;
             boolean allSolid = true;
-            for (int a = -2; a <= 2; a++) {
-                for (int dy = -1; dy <= 3; dy++) {
+            for (int a = -half - 1; a <= half + 1; a++) {
+                for (int dy = -1; dy <= clear; dy++) {
                     int x = cx + px * a, z = cz + pz * a, yy = y + dy;
-                    boolean carve = Math.abs(a) <= 1 && dy >= 0 && dy <= 2;
+                    boolean carve = Math.abs(a) <= half && dy >= 0 && dy < clear;
                     if (!in(g, x, yy, z)) { if (carve) allSolid = false; continue; }      // beyond the bounds: the stairway builds its own shell
                     String s = g.state(x, yy, z);
                     boolean outside = exterior[(yy * l + z) * w + x];
@@ -296,17 +338,17 @@ public final class DepthsLink {
         for (int pass = 0; pass < 2; pass++) {
             for (int t = -tunnel; t < GAP; t++) {
                 int cx = ex + side.dx * t, cz = ez + side.dz * t;
-                int stand = t < 0 ? ey : standLevel(t), height = t < 0 ? 3 : 4;
-                for (int a = -2; a <= 2; a++) {
+                int stand = t < 0 ? ey : standLevel(t), height = t < 0 ? clear : stairHeight();
+                for (int a = -half - 1; a <= half + 1; a++) {
                     for (int dy = -1; dy <= height; dy++) {
                         int x = cx + px * a, z = cz + pz * a, y = stand + dy;
-                        boolean carve = Math.abs(a) <= 1 && dy >= 0 && dy < height;
+                        boolean carve = Math.abs(a) <= half && dy >= 0 && dy < height;
                         boolean inside = in(g, x, y, z);
                         if (pass == 0 && !carve) {
                             // Inside the dungeon its own blocks are the shell; only fill where there is open void.
                             if (!inside || exterior[(y * l + z) * w + x]) put(x, y, z, dy == -1 ? Depths.FLOOR : Depths.WALL);
                             // ... and a floor under the tunnel where the room's own floor falls away beneath it.
-                            else if (dy == -1 && Math.abs(a) <= 1 && air(g.state(x, y, z))) put(x, y, z, Depths.FLOOR);
+                            else if (dy == -1 && Math.abs(a) <= half && air(g.state(x, y, z))) put(x, y, z, Depths.FLOOR);
                         } else if (pass == 1 && carve) {
                             put(x, y, z, a == 0 && dy == height - 1 && Math.floorMod(t, 4) == 0 ? Depths.LIGHT : Depths.AIR);
                         }
@@ -317,11 +359,11 @@ public final class DepthsLink {
         // Half steps: where the stairway drops a block, the first cell of the lower tread holds a slab.
         for (int t = 2; t < GAP; t++) {
             if (standLevel(t) == standLevel(t - 1)) continue;
-            for (int a = -1; a <= 1; a++) put(ex + side.dx * t + px * a, standLevel(t), ez + side.dz * t + pz * a, STEP);
+            for (int a = -half; a <= half; a++) put(ex + side.dx * t + px * a, standLevel(t), ez + side.dz * t + pz * a, STEP);
         }
         // A frame of accent blocks where the tunnel leaves the room, so the way down is easy to spot.
-        for (int a = -2; a <= 2; a++) for (int dy = -1; dy <= 3; dy++) {
-            boolean frame = Math.abs(a) == 2 || dy == 3 || dy == -1;
+        for (int a = -half - 1; a <= half + 1; a++) for (int dy = -1; dy <= clear; dy++) {
+            boolean frame = Math.abs(a) == half + 1 || dy == clear || dy == -1;
             if (!frame) continue;
             int x = mouth[0] + side.dx + px * a, z = mouth[2] + side.dz + pz * a, y = mouth[1] + dy;
             if (in(g, x, y, z) && !air(g.state(x, y, z))) put(x, y, z, dy == -1 ? Depths.ACCENT : Depths.PILLAR);
