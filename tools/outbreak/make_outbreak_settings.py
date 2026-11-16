@@ -38,6 +38,11 @@ ENEMY = {'normal': 'Restless', 'water': 'Tidebound', 'grass': 'Overgrown', 'elec
          'ground': 'Burrowing', 'flying': 'Stormborne', 'psychic': 'Mindlost', 'bug': 'Swarming', 'rock': 'Stonebound', 'ghost': 'Restless', 'dragon': 'Scaled',
          'dark': 'Shadowed', 'steel': 'Riveted', 'fairy': 'Bewitched'}
 
+# Depths materials for the dungeons whose own most-used blocks do not make a good wall, floor, accent and pillar.
+PALETTE = {
+    'ice': {'wall': 'minecraft:calcite', 'floor': 'minecraft:diorite', 'accent': 'minecraft:quartz_block', 'pillar': 'minecraft:packed_ice'},
+}
+
 def build(tid, layout):
     pools = layout.get('pokemon', {}).get('pools', {})
     assert all(k in pools for k in ('wild_low', 'wild_mid', 'trial', 'boss')), tid + ' is missing a pool'
@@ -74,7 +79,10 @@ def build(tid, layout):
         'gatekeeper': {'entity': boss_entity, 'pokemon': 'boss', 'name': tid.capitalize() + ' Gatekeeper', 'health': 6.0, 'healthPerStage': 0.5, 'damagePerStage': 0.2,
                        'levelPerStage': 3, 'spells': [s[0] for s in spells]},
         'checkpoints': checkpoints,
-        'features': {'chests': 5, 'outbreakChests': 2, 'timerChests': 1, 'strongboxes': 1, 'altars': 2, 'timerStage': 2, 'outbreakChestStagesPerUpgrade': 2,
+        # The Depths: a procedural maze under the dungeon, different every run. 7 x 7 cells of 24 blocks, three quarters of them rooms.
+        # Its blocks are the dungeon's own most-used building blocks unless 'palette': {'wall','floor','accent','pillar'} is given here.
+        'depths': dict({'gridW': 7, 'gridH': 7, 'cell': 24, 'occupancy': 0.75, 'loops': 0.35}, **({'palette': PALETTE[tid]} if tid in PALETTE else {})),
+        'features': {'chests': 16, 'outbreakChests': 5, 'timerChests': 2, 'strongboxes': 3, 'altars': 5, 'timerStage': 2, 'outbreakChestStagesPerUpgrade': 2,
                      'curseSeconds': 180, 'strongboxWave': 6, 'models': False},
         'spells': [{'id': s[0], 'name': s[1], 'effect': s[2], 'damage': s[3], 'radius': s[4], 'warnSeconds': s[5], 'cooldownSeconds': s[6], 'range': s[7], 'strength': s[8],
                     'colour': COLOUR[tid]} for s in spells],

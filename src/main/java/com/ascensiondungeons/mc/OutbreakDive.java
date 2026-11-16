@@ -149,6 +149,11 @@ public final class OutbreakDive {
     private final Map<UUID, Double> toughness = new HashMap<>();
     private final ServerBossEvent outbreakBar, portalBar;
     private Vec3 portalCentre;
+    /** The stairway to the Depths and the spot it leads to (both null when the dungeon has no Depths). */
+    private Vec3 descentCentre, returnCentre;
+    /** Players who just used the stairway and have not stepped off it yet, so they are not sent straight back. */
+    private final Set<UUID> travelled = new HashSet<>();
+    private boolean depthsAnnounced;
     private OutbreakClock clock;
     private long now, nextWaveAt;
     private boolean bossDown, closed;
@@ -205,6 +210,8 @@ public final class OutbreakDive {
         for (FeaturePlanner.Placement pl : host.layout().features(host.run().seed())) {
             BlockPos pos = host.world(pl.cell());
             if (pl.kind() == FeaturePlanner.Kind.PORTAL) portalCentre = Vec3.atBottomCenterOf(pos);
+            if (pl.kind() == FeaturePlanner.Kind.DESCENT) descentCentre = Vec3.atBottomCenterOf(pos);
+            if (pl.kind() == FeaturePlanner.Kind.RETURN) returnCentre = Vec3.atBottomCenterOf(pos);
             features.put(pos, new Feature(pl, pos));
         }
         if (portalCentre == null) throw new IllegalStateException("no room for an extraction portal");
@@ -218,6 +225,10 @@ public final class OutbreakDive {
     public int stage() { return clock == null ? 0 : clock.stage(now); }
     public boolean settled(UUID player) { return settled.contains(player); }
     public Vec3 portalCentre() { return portalCentre; }
+    /** The stairway to the Depths, or null when the dungeon has none. */
+    public Vec3 descentCentre() { return descentCentre; }
+    /** Where the stairway leads, in the Depths, or null. */
+    public Vec3 returnCentre() { return returnCentre; }
     private int tier() { return params.zoneTier(baseTier, stage()); }
     private UUID runId() { return host.run().id(); }
 
@@ -286,6 +297,8 @@ public final class OutbreakDive {
             else if (atPortal.add(p.getUUID())) offer(p);
         }
 
+        stairwayTick(players);
+
         if (!bossDown && !players.isEmpty() && now >= nextWaveAt) {
             enemies.values().removeIf(en -> !en.mob.isAlive());
             int count = waves.count(stage(), players.size(), enemies.size());
@@ -296,6 +309,27 @@ public final class OutbreakDive {
         spellsTick(players);
         if (now % 10 == 0) barsTick(players);
         if (now % 20 == 0) featuresTick(players);
+    }
+
+    /** Standing on the stairway carries a player down to the Depths; standing on the arrival spot carries them back up. */
+    private void stairwayTick(List<ServerPlayer> players) {
+        if (descentCentre == null || returnCentre == null) return;
+        for (ServerPlayer p : players) {
+            UUID id = p.getUUID();
+            if (settled.contains(id)) continue;
+            boolean down = p.position().distanceToSqr(descentCentre) < 1.3 * 1.3, up = p.position().distanceToSqr(returnCentre) < 1.3 * 1.3;
+            if (!down && !up) { travelled.remove(id); continue; }
+            if (!travelled.add(id)) continue;
+            Vec3 to = down ? returnCentre : descentCentre;
+            host.level().sendParticles(ParticleTypes.REVERSE_PORTAL, p.getX(), p.getY() + 1, p.getZ(), 40, 0.3, 0.6, 0.3, 0.05);
+            p.teleportTo(host.level(), to.x, to.y, to.z, p.getYRot(), p.getXRot());
+            sound(BlockPos.containing(to), SoundEvents.ENDERMAN_TELEPORT, 0.8f, down ? 0.7f : 1.3f);
+            if (down && !depthsAnnounced) {
+                depthsAnnounced = true;
+                host.say("The Depths: a maze that is different on every dive, with most of the dungeon's chests. The way back up is where you arrived, and the extraction portal is up there.", ChatFormatting.GOLD);
+            }
+            p.displayClientMessage(Component.literal(down ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
+        }
     }
 
     private void stageRose(int stage) {
@@ -452,7 +486,7 @@ public final class OutbreakDive {
         ServerPlayer focus = players.get(rng.nextInt(players.size()));
         Vec3 centre = around != null ? around : focus.position();
         int[] sc = host.schem(focus);
-        AuthoredLayout.Room room = around != null ? roomOf(around) : host.layout().roomAt(sc[0], sc[1], sc[2]);
+        AuthoredLayout.Room room = around != null ? roomOf(around) : host.layout().roomAt(host.run().seed(), sc[0], sc[1], sc[2]);
         if (room == null || room.spawnCells.length == 0) room = nearestRoom(centre);
         if (room == null) return;
         JsonObject elite = Jx.o(cfg, "elite");
@@ -489,7 +523,7 @@ public final class OutbreakDive {
     private AuthoredLayout.Room nearestRoom(Vec3 world) {
         AuthoredLayout.Room best = null;
         double bestD = Double.MAX_VALUE;
-        for (AuthoredLayout.Room r : host.layout().data().rooms)
+        for (AuthoredLayout.Room r : host.layout().rooms(host.run().seed()))
             for (int[] c : r.spawnCells) {
                 double d = Vec3.atBottomCenterOf(host.world(c)).distanceToSqr(world);
                 if (d < bestD) { bestD = d; best = r; }
@@ -499,7 +533,7 @@ public final class OutbreakDive {
 
     private AuthoredLayout.Room roomOf(Vec3 world) {
         BlockPos origin = host.world(new int[] {0, 0, 0});
-        return host.layout().roomAt((int) Math.floor(world.x) - origin.getX(), (int) Math.floor(world.y) - origin.getY(), (int) Math.floor(world.z) - origin.getZ());
+        return host.layout().roomAt(host.run().seed(), (int) Math.floor(world.x) - origin.getX(), (int) Math.floor(world.y) - origin.getY(), (int) Math.floor(world.z) - origin.getZ());
     }
 
     private void register(Mob mob, Aggro.Style style, boolean elite, Spell spell) {
@@ -940,6 +974,16 @@ public final class OutbreakDive {
                     colour = open ? 0xFFFFFF : 0x55CCFF;
                     level.sendParticles(open ? ParticleTypes.END_ROD : ParticleTypes.PORTAL, portalCentre.x, portalCentre.y + (open ? 1.5 : 0.6), portalCentre.z, open ? 30 : 12, 0.5, open ? 1.2 : 0.4, 0.5, 0.02);
                 }
+                case DESCENT -> {
+                    text = "Stairway down to the Depths";
+                    colour = 0xFFB347;
+                    level.sendParticles(ParticleTypes.REVERSE_PORTAL, f.pos.getX() + 0.5, f.pos.getY() + 0.6, f.pos.getZ() + 0.5, 10, 0.4, 0.4, 0.4, 0.02);
+                }
+                case RETURN -> {
+                    text = "Way back up";
+                    colour = 0xFFB347;
+                    level.sendParticles(ParticleTypes.REVERSE_PORTAL, f.pos.getX() + 0.5, f.pos.getY() + 0.6, f.pos.getZ() + 0.5, 10, 0.4, 0.4, 0.4, 0.02);
+                }
                 case ALTAR -> { text = f.used ? "Curse Altar (spent)" : "Curse Altar: touch to enrage the Outbreak"; colour = f.used ? 0x777777 : 0xC050FF; }
                 case TIMER_CHEST -> {
                     boolean unlocked = stage() >= timerStage;
@@ -958,7 +1002,7 @@ public final class OutbreakDive {
             boolean sealed = f.kind == FeaturePlanner.Kind.TIMER_CHEST && stage() < timerStage;
             ChestRarity look = f.kind == FeaturePlanner.Kind.OUTBREAK_CHEST ? outbreakRarity(f) : f.rarity;
             displays(f, text, colour, f.rarity == null ? 0 : com.ascensiondungeons.outbreak.ChestLook.model(f.kind, look, sealed));
-            if (f.kind != FeaturePlanner.Kind.PORTAL && !(f.kind == FeaturePlanner.Kind.ALTAR && f.used)) {
+            if (f.rarity != null || (f.kind == FeaturePlanner.Kind.ALTAR && !f.used)) {
                 Vector3f rgb = new Vector3f(((colour >> 16) & 255) / 255f, ((colour >> 8) & 255) / 255f, (colour & 255) / 255f);
                 level.sendParticles(new DustParticleOptions(rgb, 1.0f), f.pos.getX() + 0.5, f.pos.getY() + 1.1, f.pos.getZ() + 0.5, 3, 0.3, 0.2, 0.3, 0);
             }
@@ -978,7 +1022,7 @@ public final class OutbreakDive {
             for (Display old : level.getEntitiesOfClass(Display.class, new AABB(f.pos).inflate(1.5, 3, 1.5), d -> d.getTags().contains(LABEL_TAG))) old.discard();
             Display.TextDisplay d = EntityType.TEXT_DISPLAY.create(level);
             if (d == null) return;
-            d.moveTo(f.pos.getX() + 0.5, f.pos.getY() + (f.kind == FeaturePlanner.Kind.PORTAL ? 2.6 : 1.6), f.pos.getZ() + 0.5);
+            d.moveTo(f.pos.getX() + 0.5, f.pos.getY() + (f.rarity == null && f.kind != FeaturePlanner.Kind.ALTAR ? 2.6 : 1.6), f.pos.getZ() + 0.5);
             d.setBillboardConstraints(Display.BillboardConstraints.CENTER);
             d.setViewRange(0.6f);
             d.addTag(LABEL_TAG);

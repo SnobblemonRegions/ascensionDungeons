@@ -126,6 +126,14 @@ public final class DiveE2E {
         return out;
     }
 
+    private static final java.util.Set<String> opened = new java.util.HashSet<>();
+
+    /** A rarity chest this run has not opened yet (Lootr rolls a chest once per player, so a second visit finds it empty). */
+    private static int[] freshChest() {
+        for (int[] c : features("CHEST")) if (opened.add(c[0] + "," + c[1] + "," + c[2])) return c;
+        throw new IllegalStateException("no unopened chest left");
+    }
+
     /** Stand next to a block and right-click it, the way a player would. */
     private static void use(int[] at) {
         ServerLevel level = (ServerLevel) bot.level();
@@ -176,12 +184,74 @@ public final class DiveE2E {
             if (bot.getHealth() < bot.getMaxHealth()) { AscensionDungeonsLog.LOG.info("DIVE-E2E player health {} of {}", bot.getHealth(), bot.getMaxHealth()); return true; }
             return false;
         }));
+        steps.add(new Step("the stairway by the entrance carries the player down into the generated Depths", 200, new BooleanSupplier() {
+            boolean moved, logged;
+            @Override public boolean getAsBoolean() {
+                OutbreakDive d = dive();
+                bot.setInvulnerable(true);
+                if (d.descentCentre() == null) throw new IllegalStateException("this dive has no stairway");
+                if (!moved) { Vec3 p = d.descentCentre(); bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f); moved = true; return false; }
+                if (bot.position().distanceToSqr(d.returnCentre()) > 4) return false;
+                ServerLevel level = (ServerLevel) bot.level();
+                BlockPos feet = bot.blockPosition();
+                AuthoredDirector.Session s = session();
+                int[] sc = s.generator().toSchematic(feet);
+                var room = s.layout().roomAt(s.run().seed(), sc[0], sc[1], sc[2]);
+                String[] palette = s.layout().depthsPalette();
+                // Look along the floor and up a wall: the Depths are built from the dungeon's own four blocks.
+                java.util.Set<String> seen = new java.util.TreeSet<>();
+                for (int dx = -12; dx <= 12; dx++) for (int dz = -12; dz <= 12; dz++) for (int dy = -1; dy <= 9; dy++) {
+                    var state = level.getBlockState(feet.offset(dx, dy, dz));
+                    // An invisible light block counts as air, so it is looked for by name.
+                    if (!state.isAir() || state.is(net.minecraft.world.level.block.Blocks.LIGHT)) seen.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+                }
+                if (!logged) AscensionDungeonsLog.LOG.info("DIVE-E2E in the Depths: room {} of {} rooms, standing on {}, blocks nearby {}, palette {}", room == null ? null : room.id,
+                        s.layout().rooms(s.run().seed()).length, level.getBlockState(feet.below()).getBlock(), seen, java.util.Arrays.toString(palette));
+                logged = true;
+                boolean built = seen.contains(palette[0]) && seen.contains(palette[1]) && seen.contains("minecraft:light") && seen.contains("minecraft:chiseled_deepslate");
+                return room != null && com.ascensiondungeons.gen.authored.AuthoredLayout.inDepths(room) && built;
+            }
+        }));
+        steps.add(new Step("a chest down in the Depths gives marked loot", 200, new BooleanSupplier() {
+            boolean used;
+            @Override public boolean getAsBoolean() {
+                double edge = dive().returnCentre().z - 14;
+                if (!used) {
+                    for (int[] c : features("CHEST")) if (c[2] > edge && opened.add(c[0] + "," + c[1] + "," + c[2])) { use(c); used = true; AscensionDungeonsLog.LOG.info("DIVE-E2E opening the Depths chest at {} {} {}", c[0], c[1], c[2]); return false; }
+                    throw new IllegalStateException("no chest in the Depths");
+                }
+                if (!takeAll()) return false;
+                int[] c = count();
+                for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
+                return c[0] > 0 && c[0] == c[1];
+            }
+        }));
+        steps.add(new Step("a wave follows the party into the Depths", 1200, () -> {
+            double edge = dive().returnCentre().z - 14;
+            for (Mob m : dive().enemyMobs()) if (m.getZ() > edge) { AscensionDungeonsLog.LOG.info("DIVE-E2E enemy {} in the Depths at {}", m.getName().getString(), m.blockPosition().toShortString()); return true; }
+            return false;
+        }));
+        steps.add(new Step("the way back up returns the player to the entrance room", 200, new BooleanSupplier() {
+            boolean moved;
+            @Override public boolean getAsBoolean() {
+                OutbreakDive d = dive();
+                if (!moved) {
+                    // Only a player who has stepped off the arrival spot is carried when they step back on it.
+                    if (bot.position().distanceToSqr(d.returnCentre()) < 9) return false;
+                    Vec3 p = d.returnCentre();
+                    bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f);
+                    moved = true;
+                    return false;
+                }
+                return bot.position().distanceToSqr(d.descentCentre()) < 4;
+            }
+        }));
         steps.add(new Step("a rarity chest opens and its loot is marked", 100, new BooleanSupplier() {
             boolean used;
             @Override public boolean getAsBoolean() {
                 bot.setInvulnerable(true);
                 bot.setHealth(bot.getMaxHealth());
-                if (!used) { use(features("CHEST").get(0)); used = true; return false; }
+                if (!used) { use(freshChest()); used = true; return false; }
                 if (!takeAll()) return false;
                 int[] c = count();
                 AscensionDungeonsLog.LOG.info("DIVE-E2E chest 1: {} stacks, {} marked: {}", c[0], c[1], describeInventory());
@@ -202,7 +272,7 @@ public final class DiveE2E {
         steps.add(new Step("a second chest gives loot that is at risk again", 100, new BooleanSupplier() {
             boolean used;
             @Override public boolean getAsBoolean() {
-                if (!used) { use(features("CHEST").get(1)); used = true; return false; }
+                if (!used) { use(freshChest()); used = true; return false; }
                 if (!takeAll()) return false;
                 carried = count()[0];
                 return count()[1] > 0;
@@ -234,7 +304,7 @@ public final class DiveE2E {
             boolean used;
             @Override public boolean getAsBoolean() {
                 bot.setInvulnerable(true);
-                if (!used) { for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY); use(features("CHEST").get(0)); used = true; return false; }
+                if (!used) { for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY); use(freshChest()); used = true; return false; }
                 if (!takeAll()) return false;
                 carried = count()[0];
                 return count()[1] > 0;
@@ -243,7 +313,7 @@ public final class DiveE2E {
         steps.add(new Step("run 2: loot a second chest", 100, new BooleanSupplier() {
             boolean used;
             @Override public boolean getAsBoolean() {
-                if (!used) { use(features("CHEST").get(1)); used = true; return false; }
+                if (!used) { use(freshChest()); used = true; return false; }
                 return takeAll();
             }
         }));
@@ -294,7 +364,7 @@ public final class DiveE2E {
             boolean used;
             @Override public boolean getAsBoolean() {
                 bot.setInvulnerable(true);
-                if (!used) { for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY); use(features("CHEST").get(0)); used = true; return false; }
+                if (!used) { for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY); use(freshChest()); used = true; return false; }
                 if (!takeAll()) return false;
                 itemsBefore = totalItems();
                 return count()[1] > 0;
@@ -345,6 +415,7 @@ public final class DiveE2E {
             Run run;
             @Override public boolean getAsBoolean() {
                 if (run == null) {
+                    opened.clear();
                     var result = manager.get().request(Set.of(ID), "water");
                     if (!result.ok()) throw new IllegalStateException("request refused: " + result.error());
                     run = result.run();

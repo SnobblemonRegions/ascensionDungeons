@@ -10,7 +10,13 @@ import java.util.Random;
  * (spacing, nothing on the doorstep) are unit tested.
  */
 public final class FeaturePlanner {
-    public enum Kind { CHEST, OUTBREAK_CHEST, TIMER_CHEST, STRONGBOX, ALTAR, PORTAL }
+    public enum Kind {
+        CHEST, OUTBREAK_CHEST, TIMER_CHEST, STRONGBOX, ALTAR, PORTAL,
+        /** The stairway from the entrance room down to the Depths. */
+        DESCENT,
+        /** Where a party arrives in the Depths, and the way back up. */
+        RETURN
+    }
 
     /** A room and the cells in it where something can stand. Cells are {x, y, z}. */
     public record Room(String id, List<int[]> cells) {}
@@ -32,6 +38,14 @@ public final class FeaturePlanner {
     private FeaturePlanner() {}
 
     public static List<Placement> plan(List<Room> rooms, int[] entry, String entryRoom, Counts counts, long seed) {
+        return plan(rooms, entry, entryRoom, counts, seed, null, null);
+    }
+
+    /**
+     * @param depthsArrival the standing cell where a party arrives in the Depths, or null when the dungeon has none. With it the
+     *                      plan gains a DESCENT near the entrance and a RETURN on that cell.
+     */
+    public static List<Placement> plan(List<Room> rooms, int[] entry, String entryRoom, Counts counts, long seed, int[] depthsArrival, String depthsRoom) {
         Random rng = new Random(seed ^ 0x4F5554425245414BL);
         List<Placement> out = new ArrayList<>();
         Room home = null;
@@ -53,6 +67,19 @@ public final class FeaturePlanner {
         }
         if (portal == null) portal = portalRoom.cells().get(0);
         out.add(new Placement(Kind.PORTAL, null, portalRoom.id(), portal));
+        if (depthsArrival != null) {
+            // The stairway: the next-nearest cell to the entrance that keeps its distance from the portal.
+            int[] descent = null;
+            best = Double.MAX_VALUE;
+            for (int[] c : portalRoom.cells()) {
+                double d = distSq(c, entry);
+                if (d >= PORTAL_MIN * PORTAL_MIN && d < best && distSq(c, portal) >= SPACING * SPACING) { best = d; descent = c; }
+            }
+            if (descent != null) {
+                out.add(new Placement(Kind.DESCENT, null, portalRoom.id(), descent));
+                out.add(new Placement(Kind.RETURN, null, depthsRoom, depthsArrival));
+            }
+        }
 
         // Strongboxes and timer chests are the prizes: never in the entry room when another room exists.
         List<Room> deep = new ArrayList<>(usable);

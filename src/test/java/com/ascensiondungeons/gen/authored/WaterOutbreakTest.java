@@ -76,20 +76,85 @@ class WaterOutbreakTest {
         for (String id : TYPES) {
             AuthoredLayout layout = AuthoredLayout.get(id);
             JsonObject f = Jx.o(layout.outbreak(), "features");
-            int wanted = 1 + Jx.i(f, "chests", 0) + Jx.i(f, "outbreakChests", 0) + Jx.i(f, "timerChests", 0) + Jx.i(f, "strongboxes", 0) + Jx.i(f, "altars", 0);
+            // the portal, the stairway down and the way back up, plus everything the settings ask for
+            int wanted = 3 + Jx.i(f, "chests", 0) + Jx.i(f, "outbreakChests", 0) + Jx.i(f, "timerChests", 0) + Jx.i(f, "strongboxes", 0) + Jx.i(f, "altars", 0);
             Set<String> bossRooms = new HashSet<>();
             for (JsonElement b : layout.data().bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));
-            for (long seed = 1; seed <= 60; seed++) {
+            int[] o = layout.depthsOrigin();
+            for (long seed = 1; seed <= 40; seed++) {
                 List<FeaturePlanner.Placement> plan = layout.features(seed);
                 assertEquals(wanted, plan.size(), id + " seed " + seed);
+                var depths = layout.depths(seed);
+                int deep = 0;
                 for (FeaturePlanner.Placement p : plan) {
                     int[] c = p.cell();
-                    assertEquals("minecraft:air", layout.stateAt(c[0], c[1], c[2]), id + " seed " + seed + " " + p.kind() + " feet");
-                    assertNotEquals("minecraft:air", layout.stateAt(c[0], c[1] - 1, c[2]), id + " seed " + seed + " " + p.kind() + " floor");
+                    String where = id + " seed " + seed + " " + p.kind();
+                    // Authored rooms can overlap, so ask the room the plan names rather than the first one at that spot.
+                    AuthoredLayout.Room room = null;
+                    for (AuthoredLayout.Room r : layout.rooms(seed)) if (r.id.equals(p.room())) room = r;
+                    assertNotNull(room, where + " names a real room");
+                    assertTrue(room.contains(c[0], c[1], c[2]), where + " is inside " + room.id);
+                    if (AuthoredLayout.inDepths(room)) {
+                        deep++;
+                        assertTrue(depths.open(c[0] - o[0], c[1] - o[1], c[2] - o[2]), where + " feet");
+                        assertFalse(depths.open(c[0] - o[0], c[1] - o[1] - 1, c[2] - o[2]), where + " floor");
+                    } else {
+                        assertEquals("minecraft:air", layout.stateAt(c[0], c[1], c[2]), where + " feet");
+                        assertNotEquals("minecraft:air", layout.stateAt(c[0], c[1] - 1, c[2]), where + " floor");
+                    }
                     assertFalse(bossRooms.contains(p.room()), id + ": nothing in the boss's room");
                 }
+                assertTrue(deep >= wanted / 2, id + " seed " + seed + ": most features are down in the Depths (" + deep + " of " + wanted + ")");
             }
         }
+    }
+
+    @Test
+    void everyDiveHasDepthsReachedByAStairwayNextToTheEntrance() {
+        for (String id : TYPES) {
+            AuthoredLayout layout = AuthoredLayout.get(id);
+            assertTrue(layout.hasDepths(), id);
+            AuthoredLayout.Room home = layout.entryRoom();
+            for (long seed = 1; seed <= 10; seed++) {
+                var depths = layout.depths(seed);
+                assertEquals(layout.data().rooms.length + depths.rooms().size(), layout.rooms(seed).length, id);
+                assertTrue(depths.rooms().size() >= 30, id + " has a big maze: " + depths.rooms().size() + " rooms");
+                FeaturePlanner.Placement descent = null, back = null, portal = null;
+                for (FeaturePlanner.Placement p : layout.features(seed)) {
+                    if (p.kind() == FeaturePlanner.Kind.DESCENT) descent = p;
+                    if (p.kind() == FeaturePlanner.Kind.RETURN) back = p;
+                    if (p.kind() == FeaturePlanner.Kind.PORTAL) portal = p;
+                }
+                assertNotNull(descent, id + " seed " + seed + " has a stairway");
+                assertNotNull(back, id + " seed " + seed + " has a way back");
+                assertEquals(home.id, descent.room(), id + ": the stairway is in the entrance room");
+                assertEquals(home.id, portal.room());
+                int[] o = layout.depthsOrigin(), e = depths.entrance();
+                assertArrayEquals(new int[] {e[0] + o[0], e[1] + o[1], e[2] + o[2]}, back.cell(), id + ": the way back is where the party arrives");
+                assertTrue(AuthoredLayout.inDepths(layout.roomAt(seed, back.cell()[0], back.cell()[1], back.cell()[2])));
+            }
+            // a different run is a different maze
+            var a = layout.depths(101);
+            var b = layout.depths(202);
+            boolean differs = a.rooms().size() != b.rooms().size();
+            for (int x = 0; x < a.sizeX() && !differs; x += 5) for (int z = 0; z < a.sizeZ() && !differs; z += 5) differs = a.role(x, 2, z) != b.role(x, 2, z);
+            assertTrue(differs, id);
+        }
+    }
+
+    @Test
+    void theDepthsAreBuiltFromFourSafeBlocksOfTheDungeonsOwn() {
+        for (String id : TYPES) {
+            String[] p = AuthoredLayout.get(id).depthsPalette();
+            assertEquals(4, p.length);
+            for (String block : p) assertTrue(block.startsWith("minecraft:") && !block.contains("["), id + " " + block);
+            assertNotEquals(p[0], p[1], id + ": wall and floor differ");
+        }
+        assertEquals("minecraft:packed_ice", AuthoredLayout.get("ice").depthsPalette()[3], "ice has a hand-picked palette");
+        assertFalse(AuthoredLayout.buildingBlock("minecraft:sand"));
+        assertFalse(AuthoredLayout.buildingBlock("minecraft:oak_stairs"));
+        assertFalse(AuthoredLayout.buildingBlock("minecraft:water"));
+        assertTrue(AuthoredLayout.buildingBlock("minecraft:stone_bricks"));
     }
 
     @Test

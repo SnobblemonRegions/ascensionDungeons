@@ -55,6 +55,10 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
     private final AuthoredLayout layout;
     private final BlockState[] palette;
     private final int ox, oy, oz;
+    /** This run's procedural Depths (null when the dungeon has none), where its corner is in the world, and its blocks by role. */
+    private final com.ascensiondungeons.gen.depths.Depths depths;
+    private final int dx0, dy0, dz0;
+    private final BlockState[] depthBlocks;
 
     public AuthoredChunkGenerator(Holder<Biome> biome, String dungeon, long seed) {
         super(new FixedBiomeSource(biome));
@@ -71,6 +75,30 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
             // Chests are placed in decoration (they need a block entity, Lootr and the key).
             palette[i] = s.is(Blocks.CHEST) ? Blocks.AIR.defaultBlockState() : s;
         }
+        // Without Lootr there is no Outbreak dive, so no Depths either (see OutbreakDive.lootrInstalled).
+        this.depths = OutbreakDive.lootrInstalled() ? layout.depths(seed) : null;
+        int[] o = layout.depthsOrigin();
+        this.dx0 = ox + o[0];
+        this.dy0 = oy + o[1];
+        this.dz0 = oz + o[2];
+        this.depthBlocks = new BlockState[6];
+        if (depths != null) {
+            String[] p = layout.depthsPalette();
+            depthBlocks[com.ascensiondungeons.gen.depths.Depths.WALL] = state(p[0]);
+            depthBlocks[com.ascensiondungeons.gen.depths.Depths.FLOOR] = state(p[1]);
+            depthBlocks[com.ascensiondungeons.gen.depths.Depths.ACCENT] = state(p[2]);
+            depthBlocks[com.ascensiondungeons.gen.depths.Depths.PILLAR] = state(p[3]);
+            depthBlocks[com.ascensiondungeons.gen.depths.Depths.AIR] = Blocks.AIR.defaultBlockState();
+            depthBlocks[com.ascensiondungeons.gen.depths.Depths.LIGHT] = Blocks.LIGHT.defaultBlockState().setValue(LightBlock.LEVEL, 13);
+        }
+    }
+
+    /** The block of the Depths at a world position, or null outside them. */
+    private BlockState depthsBlock(int x, int y, int z) {
+        if (depths == null) return null;
+        int lx = x - dx0, ly = y - dy0, lz = z - dz0;
+        if (lx < 0 || lz < 0 || ly < 0 || lx >= depths.sizeX() || lz >= depths.sizeZ() || ly >= com.ascensiondungeons.gen.depths.Depths.HEIGHT) return null;
+        return depthBlocks[depths.role(lx, ly, lz)];
     }
 
     public AuthoredLayout layout() { return layout; }
@@ -78,9 +106,12 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
     public BlockPos toWorld(int[] c) { return new BlockPos(ox + c[0], oy + c[1], oz + c[2]); }
     public int[] toSchematic(BlockPos p) { return new int[] {p.getX() - ox, p.getY() - oy, p.getZ() - oz}; }
     public BlockPos worldEntry() { return toWorld(layout.data().entry); }
-    public double centreX() { return ox + layout.width() / 2.0; }
-    public double centreZ() { return oz + layout.length() / 2.0; }
-    public double borderSize() { return Math.max(layout.width(), layout.length()) + 48; }
+    /** The level's border is centred on, and sized to hold, the authored dungeon and the Depths together. */
+    private double spanX() { return depths == null ? layout.width() : Math.max(layout.width(), depths.sizeX()); }
+    private double spanZ() { return depths == null ? layout.length() : layout.length() + AuthoredLayout.DEPTHS_GAP + depths.sizeZ(); }
+    public double centreX() { return ox + spanX() / 2.0; }
+    public double centreZ() { return oz + spanZ() / 2.0; }
+    public double borderSize() { return Math.max(spanX(), spanZ()) + 48; }
 
     @Override protected MapCodec<? extends ChunkGenerator> codec() { return CODEC; }
     @Override public int getGenDepth() { return 384; }
@@ -99,6 +130,13 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         for (int x = x0; x < x0 + 16; x++) for (int z = z0; z < z0 + 16; z++) {
+            if (depths != null && z >= dz0) {
+                for (int ly = 0; ly < com.ascensiondungeons.gen.depths.Depths.HEIGHT; ly++) {
+                    BlockState s = depthsBlock(x, dy0 + ly, z);
+                    if (s != null && !s.isAir()) chunk.setBlockState(pos.set(x, dy0 + ly, z), s, false);
+                }
+                continue;
+            }
             int sx = x - ox, sz = z - oz;
             if (sx < 0 || sz < 0 || sx >= layout.width() || sz >= layout.length()) continue;
             for (int sy = 0; sy < layout.height(); sy++) {
@@ -132,7 +170,8 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
         int sx = x - ox, sz = z - oz;
         for (int i = 0; i < out.length; i++) {
             int sy = i + min - oy;
-            out[i] = sx >= 0 && sz >= 0 && sx < layout.width() && sz < layout.length() && sy >= 0 && sy < layout.height()
+            BlockState deep = depthsBlock(x, i + min, z);
+            out[i] = deep != null ? deep : sx >= 0 && sz >= 0 && sx < layout.width() && sz < layout.length() && sy >= 0 && sy < layout.height()
                     ? block(sx, sy, sz) : Blocks.AIR.defaultBlockState();
         }
         return new NoiseColumn(min, out);
@@ -165,6 +204,7 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
             if (pos.getX() < x0 || pos.getX() >= x0 + 16 || pos.getZ() < z0 || pos.getZ() >= z0 + 16) continue;
             switch (f.kind()) {
                 case PORTAL -> level.setBlock(pos.below(), state("minecraft:lodestone"), 2);
+                case DESCENT, RETURN -> level.setBlock(pos.below(), state("minecraft:chiseled_deepslate"), 2);
                 case ALTAR -> level.setBlock(pos, state("minecraft:crying_obsidian"), 2);
                 default -> {
                     // The floor under a chest shows its rarity even without a resource pack.

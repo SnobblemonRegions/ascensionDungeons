@@ -87,12 +87,19 @@
     "sparring_trial",
     "offering"
   ],
+  "depths": {
+    "gridW": 7,
+    "gridH": 7,
+    "cell": 24,
+    "occupancy": 0.75,
+    "loops": 0.35
+  },
   "features": {
-    "chests": 5,
-    "outbreakChests": 2,
-    "timerChests": 1,
-    "strongboxes": 1,
-    "altars": 2,
+    "chests": 16,
+    "outbreakChests": 5,
+    "timerChests": 2,
+    "strongboxes": 3,
+    "altars": 5,
     "timerStage": 2,
     "outbreakChestStagesPerUpgrade": 2,
     "curseSeconds": 180,

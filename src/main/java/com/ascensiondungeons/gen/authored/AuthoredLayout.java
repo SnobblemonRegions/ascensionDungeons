@@ -123,6 +123,129 @@ public final class AuthoredLayout {
     /** This dungeon's Outbreak dive settings ({@code outbreak.json} beside the layout), or null when it is an ordinary dungeon. */
     public JsonObject outbreak() { return outbreak; }
 
+    // ---- the Depths (procedural, per run) ------------------------------------------------------------------------
+
+    /** Blocks between the authored dungeon and the Depths, so neither is ever seen from the other. */
+    public static final int DEPTHS_GAP = 48;
+    private final java.util.LinkedHashMap<Long, com.ascensiondungeons.gen.depths.Depths> depthsCache = new java.util.LinkedHashMap<>();
+    private final Map<Long, Room[]> depthRoomCache = new HashMap<>();
+    private String[] depthsPalette;
+
+    /** Whether this dungeon has procedural Depths ({@code depths} in its outbreak.json). */
+    public boolean hasDepths() { return outbreak != null && Jx.o(outbreak, "depths") != null; }
+
+    /** Where the Depths' corner sits, in schematic coordinates: beyond the authored dungeon along z. */
+    public int[] depthsOrigin() { return new int[] {0, 2, schem.length() + DEPTHS_GAP}; }
+
+    /** This run's Depths, or null when the dungeon has none. Generated once per seed and remembered for a few runs. */
+    public synchronized com.ascensiondungeons.gen.depths.Depths depths(long seed) {
+        if (!hasDepths()) return null;
+        com.ascensiondungeons.gen.depths.Depths d = depthsCache.get(seed);
+        if (d == null) {
+            JsonObject p = Jx.o(outbreak, "depths");
+            d = com.ascensiondungeons.gen.depths.Depths.generate(seed, new com.ascensiondungeons.gen.depths.Depths.Params(
+                    Jx.i(p, "gridW", 7), Jx.i(p, "gridH", 7), Jx.i(p, "cell", 24), Jx.d(p, "occupancy", 0.75), Jx.d(p, "loops", 0.35)));
+            depthsCache.put(seed, d);
+            if (depthsCache.size() > 6) {                       // a handful of live runs at most
+                Long oldest = depthsCache.keySet().iterator().next();
+                depthsCache.remove(oldest);
+                depthRoomCache.remove(oldest);
+                featureCache.remove(oldest);
+            }
+        }
+        return d;
+    }
+
+    /** Every room of this run: the authored ones, then the Depths' (ids {@code D<column>_<row>}), all in schematic coordinates. */
+    public synchronized Room[] rooms(long seed) {
+        com.ascensiondungeons.gen.depths.Depths d = depths(seed);
+        if (d == null) return data.rooms;
+        Room[] cached = depthRoomCache.get(seed);
+        if (cached != null) return cached;
+        {
+            int[] o = depthsOrigin();
+            java.util.List<Room> out = new java.util.ArrayList<>(java.util.Arrays.asList(data.rooms));
+            for (com.ascensiondungeons.gen.depths.Depths.Room r : d.rooms()) {
+                Room room = new Room();
+                room.id = r.id();
+                room.name = "The Depths";
+                room.min = new int[] {r.min()[0] + o[0], r.min()[1] + o[1], r.min()[2] + o[2]};
+                room.max = new int[] {r.max()[0] + o[0], r.max()[1] + o[1], r.max()[2] + o[2]};
+                room.spawnCells = new int[r.cells().size()][];
+                for (int i = 0; i < room.spawnCells.length; i++) {
+                    int[] c = r.cells().get(i);
+                    room.spawnCells[i] = new int[] {c[0] + o[0], c[1] + o[1], c[2] + o[2]};
+                }
+                out.add(room);
+            }
+            cached = out.toArray(new Room[0]);
+            depthRoomCache.put(seed, cached);
+            return cached;
+        }
+    }
+
+    public Room roomAt(long seed, int x, int y, int z) {
+        for (Room r : rooms(seed)) if (r.contains(x, y, z)) return r;
+        return null;
+    }
+
+    /** True for a room of the Depths (as opposed to an authored room). */
+    public static boolean inDepths(Room room) { return room != null && room.id.startsWith("D") && room.id.indexOf('_') > 0; }
+
+    /**
+     * The four block states the Depths are built from: wall, floor, accent, pillar. Taken from {@code depths.palette} in
+     * outbreak.json when given, otherwise the dungeon's own most-used building blocks, so the Depths look like part of it.
+     */
+    public synchronized String[] depthsPalette() {
+        if (depthsPalette != null) return depthsPalette;
+        JsonObject given = Jx.o(Jx.o(outbreak, "depths"), "palette");
+        java.util.List<String> ranked = new java.util.ArrayList<>();
+        if (given == null || !given.has("wall") || !given.has("floor") || !given.has("accent") || !given.has("pillar")) {
+            long[] uses = new long[schem.palette().length];
+            for (int y = 0; y < schem.height(); y++) for (int z = 0; z < schem.length(); z++) for (int x = 0; x < schem.width(); x++) uses[schem.at(x, y, z)]++;
+            Map<String, Long> byBlock = new HashMap<>();
+            for (int i = 0; i < uses.length; i++) {
+                String name = schem.palette()[i];
+                int bracket = name.indexOf('[');
+                if (bracket > 0) name = name.substring(0, bracket);
+                if (buildingBlock(name)) byBlock.merge(name, uses[i], Long::sum);
+            }
+            byBlock.entrySet().stream().sorted((a, b) -> Long.compare(b.getValue(), a.getValue())).forEach(e -> ranked.add(e.getKey()));
+        }
+        String fallback = ranked.isEmpty() ? "minecraft:stone_bricks" : ranked.get(0);
+        depthsPalette = new String[] {
+                Jx.s(given, "wall", fallback),
+                Jx.s(given, "floor", ranked.size() > 1 ? ranked.get(1) : fallback),
+                Jx.s(given, "accent", ranked.size() > 2 ? ranked.get(2) : fallback),
+                Jx.s(given, "pillar", ranked.size() > 3 ? ranked.get(3) : ranked.size() > 2 ? ranked.get(2) : fallback)};
+        return depthsPalette;
+    }
+
+    /** A plain, full, inert block that is safe to build walls and floors from. Deliberately strict: when in doubt, leave it out. */
+    static boolean buildingBlock(String name) {
+        String n = name.substring(name.indexOf(':') + 1);
+        String[] no = {"air", "water", "lava", "light", "stairs", "slab", "_wall", "fence", "leaves", "glass", "door", "torch", "lantern", "chest", "lever", "button", "plate",
+                "carpet", "pane", "bars", "chain", "sign", "banner", "vine", "flower", "sapling", "fern", "mushroom", "kelp", "seagrass", "coral", "rail", "candle", "bed", "head",
+                "skull", "pot", "cluster", "bud", "dripstone", "sand", "gravel", "powder", "tnt", "spawner", "magma", "cactus", "campfire", "fire", "honey", "slime", "sculk",
+                "barrier", "structure", "command", "piston", "observer", "redstone", "dispenser", "dropper", "hopper", "furnace", "table", "anvil", "cauldron", "bell", "beacon",
+                "portal", "farmland", "path", "ice", "snow", "web", "scaffolding", "ladder", "roots", "moss", "azalea", "bamboo", "sugar", "wheat", "crop", "stem", "petals",
+                "grass", "bush", "tulip", "orchid", "allium", "dandelion", "poppy", "lily", "rose", "peony", "lilac", "sunflower", "froglight", "shroomlight", "glowstone",
+                "sea_lantern", "end_rod", "lightning", "tripwire", "hook", "banner", "shulker", "barrel", "bookshelf", "lectern", "jukebox", "note_block", "target", "sponge",
+                "infested", "suspicious", "egg", "cake", "frame", "stand", "grindstone", "loom", "composter", "beehive", "bee_nest", "conduit", "respawn", "lodestone", "dirt",
+                "mud", "clay", "podzol", "mycelium", "nylium", "obsidian", "bedrock", "ore", "raw_", "wart", "hay", "melon", "pumpkin", "dried", "bone_block", "anchor", "vault",
+                "trial", "crafter", "copper_bulb", "grate", "trapdoor", "hanging", "pink_petals", "spore", "sprouts", "pitcher", "torchflower", "cocoa", "nether_wart", "chorus",
+                "dragon", "wither", "soul", "netherrack", "basalt_"};
+        for (String bad : no) if (n.contains(bad)) return false;
+        return true;
+    }
+
+    private boolean airAt(com.ascensiondungeons.gen.depths.Depths d, int x, int y, int z) {
+        if (z < schem.length()) return air(x, y, z);
+        if (d == null) return false;
+        int[] o = depthsOrigin();
+        return d.open(x - o[0], y - o[1], z - o[2]);
+    }
+
     /** The room the party enters in, or null. */
     public Room entryRoom() { return roomAt(data.entry[0], data.entry[1], data.entry[2]); }
 
@@ -133,11 +256,11 @@ public final class AuthoredLayout {
     }
 
     /** A standing cell with open floor on all four sides, so something placed on it can always be walked around. */
-    private boolean open(int[] c) {
+    private boolean open(com.ascensiondungeons.gen.depths.Depths depths, int[] c) {
         int[][] around = {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         for (int[] d : around) {
             int x = c[0] + d[0], z = c[2] + d[1];
-            if (!air(x, c[1], z) || !air(x, c[1] + 1, z) || air(x, c[1] - 1, z)) return false;
+            if (!airAt(depths, x, c[1], z) || !airAt(depths, x, c[1] + 1, z) || airAt(depths, x, c[1] - 1, z)) return false;
         }
         return true;
     }
@@ -173,7 +296,9 @@ public final class AuthoredLayout {
      */
     public synchronized java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Placement> features(long seed) {
         if (outbreak == null) return java.util.List.of();
-        return featureCache.computeIfAbsent(seed, k -> {
+        java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Placement> cached = featureCache.get(seed);
+        if (cached != null) return cached;
+        {
             java.util.List<Box> boxes = new java.util.ArrayList<>();
             java.util.List<int[]> points = new java.util.ArrayList<>();
             collect(data.hazards, boxes, points);
@@ -182,18 +307,29 @@ public final class AuthoredLayout {
             for (Chest c : data.chests) points.add(c.pos);
             Set<String> bossRooms = new HashSet<>();
             for (JsonElement b : data.bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));
+            com.ascensiondungeons.gen.depths.Depths depths = depths(seed);
             java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Room> rooms = new java.util.ArrayList<>();
-            for (Room r : data.rooms) {
+            for (Room r : rooms(seed)) {
                 java.util.List<int[]> cells = new java.util.ArrayList<>();
-                if (!bossRooms.contains(r.id)) for (int[] c : r.spawnCells) if (open(c) && !reserved(c, boxes, points)) cells.add(c);
+                if (!bossRooms.contains(r.id)) for (int[] c : r.spawnCells) if (open(depths, c) && !reserved(c, boxes, points)) cells.add(c);
                 rooms.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Room(r.id, cells));
+            }
+            int[] arrival = null;
+            String arrivalRoom = null;
+            if (depths != null) {
+                int[] o = depthsOrigin(), e = depths.entrance();
+                arrival = new int[] {e[0] + o[0], e[1] + o[1], e[2] + o[2]};
+                Room at = roomAt(seed, arrival[0], arrival[1], arrival[2]);
+                arrivalRoom = at == null ? "" : at.id;
             }
             JsonObject f = Jx.o(outbreak, "features");
             var counts = new com.ascensiondungeons.outbreak.FeaturePlanner.Counts(Jx.i(f, "chests", 4), Jx.i(f, "outbreakChests", 1),
                     Jx.i(f, "timerChests", 1), Jx.i(f, "strongboxes", 1), Jx.i(f, "altars", 1));
             Room home = entryRoom();
-            return java.util.List.copyOf(com.ascensiondungeons.outbreak.FeaturePlanner.plan(rooms, data.entry, home == null ? "" : home.id, counts, seed));
-        });
+            cached = java.util.List.copyOf(com.ascensiondungeons.outbreak.FeaturePlanner.plan(rooms, data.entry, home == null ? "" : home.id, counts, seed, arrival, arrivalRoom));
+            featureCache.put(seed, cached);
+            return cached;
+        }
     }
 
     public Room room(String id) {
