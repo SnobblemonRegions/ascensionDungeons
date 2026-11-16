@@ -125,8 +125,7 @@ public final class AuthoredLayout {
 
     // ---- the Depths (procedural, per run) ------------------------------------------------------------------------
 
-    /** Blocks between the authored dungeon and the Depths, so neither is ever seen from the other. */
-    public static final int DEPTHS_GAP = 48;
+    private com.ascensiondungeons.gen.depths.DepthsLink link;
     private final java.util.LinkedHashMap<Long, com.ascensiondungeons.gen.depths.Depths> depthsCache = new java.util.LinkedHashMap<>();
     private final Map<Long, Room[]> depthRoomCache = new HashMap<>();
     private String[] depthsPalette;
@@ -134,17 +133,58 @@ public final class AuthoredLayout {
     /** Whether this dungeon has procedural Depths ({@code depths} in its outbreak.json). */
     public boolean hasDepths() { return outbreak != null && Jx.o(outbreak, "depths") != null; }
 
-    /** Where the Depths' corner sits, in schematic coordinates: beyond the authored dungeon along z. */
-    public int[] depthsOrigin() { return new int[] {0, 2, schem.length() + DEPTHS_GAP}; }
+    private com.ascensiondungeons.gen.depths.Depths.Params depthsParams() {
+        JsonObject p = Jx.o(outbreak, "depths");
+        return new com.ascensiondungeons.gen.depths.Depths.Params(Jx.i(p, "gridW", 7), Jx.i(p, "gridH", 7), Jx.i(p, "cell", 24), Jx.d(p, "occupancy", 0.75), Jx.d(p, "loops", 0.35));
+    }
+
+    /**
+     * How the Depths join this dungeon: a tunnel out of the entrance room and a stairway down, wherever one can be cut without
+     * touching another room, a mechanism or water; otherwise detached, with a teleporting stairway. Worked out once per dungeon
+     * (it does not depend on the run), so the way down is always in the same place. {@code "link": "pad"} under {@code depths}
+     * in outbreak.json forces the detached form. Null when the dungeon has no Depths.
+     */
+    public synchronized com.ascensiondungeons.gen.depths.DepthsLink link() {
+        if (!hasDepths()) return null;
+        if (link != null) return link;
+        var p = depthsParams();
+        int sizeX = p.gridW() * p.cell(), sizeZ = p.gridH() * p.cell(), doorX = com.ascensiondungeons.gen.depths.Depths.doorX(p);
+        com.ascensiondungeons.gen.depths.DepthsLink.Grid grid = new com.ascensiondungeons.gen.depths.DepthsLink.Grid() {
+            @Override public int width() { return schem.width(); }
+            @Override public int height() { return schem.height(); }
+            @Override public int length() { return schem.length(); }
+            @Override public String state(int x, int y, int z) { return stateAt(x, y, z); }
+        };
+        Room home = entryRoom();
+        if (home == null || "pad".equals(Jx.s(Jx.o(outbreak, "depths"), "link", "tunnel"))) {
+            link = com.ascensiondungeons.gen.depths.DepthsLink.detached(grid, sizeX, sizeZ, doorX);
+            return link;
+        }
+        java.util.List<Box> boxes = new java.util.ArrayList<>();
+        java.util.List<int[]> points = new java.util.ArrayList<>();
+        collectReserved(boxes, points);
+        java.util.List<int[]> starts = new java.util.ArrayList<>();
+        starts.add(data.entry);
+        starts.addAll(java.util.Arrays.asList(home.spawnCells));
+        link = com.ascensiondungeons.gen.depths.DepthsLink.find(grid, starts, c -> sealBlocks.containsKey(key(c[0], c[1], c[2])) || reserved(c, boxes, points),
+                c -> home.contains(c[0], c[1], c[2]), data.entry, sizeX, sizeZ, doorX);
+        return link;
+    }
+
+    private void collectReserved(java.util.List<Box> boxes, java.util.List<int[]> points) {
+        collect(data.hazards, boxes, points);
+        collect(data.mechanics, boxes, points);
+        collect(data.pads, boxes, points);
+        for (Chest c : data.chests) points.add(c.pos);
+    }
 
     /** This run's Depths, or null when the dungeon has none. Generated once per seed and remembered for a few runs. */
     public synchronized com.ascensiondungeons.gen.depths.Depths depths(long seed) {
         if (!hasDepths()) return null;
         com.ascensiondungeons.gen.depths.Depths d = depthsCache.get(seed);
         if (d == null) {
-            JsonObject p = Jx.o(outbreak, "depths");
-            d = com.ascensiondungeons.gen.depths.Depths.generate(seed, new com.ascensiondungeons.gen.depths.Depths.Params(
-                    Jx.i(p, "gridW", 7), Jx.i(p, "gridH", 7), Jx.i(p, "cell", 24), Jx.d(p, "occupancy", 0.75), Jx.d(p, "loops", 0.35)));
+            // A maze joined by a tunnel has a doorway in its near wall; a detached one is sealed.
+            d = com.ascensiondungeons.gen.depths.Depths.generate(seed, depthsParams(), link().physical());
             depthsCache.put(seed, d);
             if (depthsCache.size() > 6) {                       // a handful of live runs at most
                 Long oldest = depthsCache.keySet().iterator().next();
@@ -163,18 +203,20 @@ public final class AuthoredLayout {
         Room[] cached = depthRoomCache.get(seed);
         if (cached != null) return cached;
         {
-            int[] o = depthsOrigin();
+            com.ascensiondungeons.gen.depths.DepthsLink at = link();
             java.util.List<Room> out = new java.util.ArrayList<>(java.util.Arrays.asList(data.rooms));
             for (com.ascensiondungeons.gen.depths.Depths.Room r : d.rooms()) {
                 Room room = new Room();
                 room.id = r.id();
                 room.name = "The Depths";
-                room.min = new int[] {r.min()[0] + o[0], r.min()[1] + o[1], r.min()[2] + o[2]};
-                room.max = new int[] {r.max()[0] + o[0], r.max()[1] + o[1], r.max()[2] + o[2]};
+                // The maze may be turned to face the dungeon, so its corners can swap.
+                int[] a = at.toSchem(r.min()[0], r.min()[1], r.min()[2]), b = at.toSchem(r.max()[0], r.max()[1], r.max()[2]);
+                room.min = new int[] {Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2])};
+                room.max = new int[] {Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2])};
                 room.spawnCells = new int[r.cells().size()][];
                 for (int i = 0; i < room.spawnCells.length; i++) {
                     int[] c = r.cells().get(i);
-                    room.spawnCells[i] = new int[] {c[0] + o[0], c[1] + o[1], c[2] + o[2]};
+                    room.spawnCells[i] = at.toSchem(c[0], c[1], c[2]);
                 }
                 out.add(room);
             }
@@ -239,12 +281,49 @@ public final class AuthoredLayout {
         return true;
     }
 
-    private boolean airAt(com.ascensiondungeons.gen.depths.Depths d, int x, int y, int z) {
-        if (z < schem.length()) return air(x, y, z);
-        if (d == null) return false;
-        int[] o = depthsOrigin();
-        return d.open(x - o[0], y - o[1], z - o[2]);
+    /**
+     * Slabs the stairway's half steps may be built from, best first: {@code depths.step} in outbreak.json, the slab forms of
+     * the four Depths blocks, the slabs the dungeon itself uses most, and a plain stone slab. The game uses the first that exists.
+     */
+    public synchronized java.util.List<String> depthsSteps() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        String given = Jx.s(Jx.o(outbreak, "depths"), "step", null);
+        if (given != null) out.add(given);
+        for (String block : depthsPalette()) { String slab = slabOf(block); if (!out.contains(slab)) out.add(slab); }
+        Map<String, Integer> used = new HashMap<>();
+        for (int x = 0; x < schem.width(); x++) for (int y = 0; y < schem.height(); y++) for (int z = 0; z < schem.length(); z++) {
+            String state = stateAt(x, y, z);
+            int cut = state.indexOf('[');
+            String name = cut < 0 ? state : state.substring(0, cut);
+            if (name.endsWith("_slab")) used.merge(name, 1, Integer::sum);
+        }
+        used.entrySet().stream().sorted((a, b) -> b.getValue() != a.getValue().intValue() ? b.getValue() - a.getValue() : a.getKey().compareTo(b.getKey()))
+                .forEach(e -> { if (!out.contains(e.getKey())) out.add(e.getKey()); });
+        if (!out.contains("minecraft:smooth_stone_slab")) out.add("minecraft:smooth_stone_slab");
+        return out;
     }
+
+    /** The name a block's slab would have, if it has one: {@code stone_bricks -> stone_brick_slab}, {@code oak_planks -> oak_slab}. */
+    public static String slabOf(String block) {
+        if (block.endsWith("_bricks") || block.endsWith("_tiles")) return block.substring(0, block.length() - 1) + "_slab";
+        if (block.endsWith("_planks")) return block.substring(0, block.length() - "_planks".length()) + "_slab";
+        return block + "_slab";
+    }
+
+    private boolean airAt(com.ascensiondungeons.gen.depths.Depths d, int x, int y, int z) {
+        com.ascensiondungeons.gen.depths.DepthsLink at = link();
+        if (at != null) {
+            Byte cut = at.override(x, y, z);                       // the tunnel and the stairway
+            if (cut != null) return com.ascensiondungeons.gen.depths.DepthsLink.open(cut);
+        }
+        if (x >= 0 && y >= 0 && z >= 0 && x < schem.width() && y < schem.height() && z < schem.length()) return air(x, y, z);
+        if (d == null || at == null) return false;
+        int[] l = at.toLocal(x, y, z);
+        return d.open(l[0], l[1], l[2]);
+    }
+
+    /** Whether a creature can occupy this cell in this run: open air in the dungeon, the tunnel, the stairway or the Depths. */
+    public boolean passable(long seed, int x, int y, int z) { return airAt(depths(seed), x, y, z); }
 
     /** The room the party enters in, or null. */
     public Room entryRoom() { return roomAt(data.entry[0], data.entry[1], data.entry[2]); }
@@ -301,10 +380,13 @@ public final class AuthoredLayout {
         {
             java.util.List<Box> boxes = new java.util.ArrayList<>();
             java.util.List<int[]> points = new java.util.ArrayList<>();
-            collect(data.hazards, boxes, points);
-            collect(data.mechanics, boxes, points);
-            collect(data.pads, boxes, points);
-            for (Chest c : data.chests) points.add(c.pos);
+            collectReserved(boxes, points);
+            com.ascensiondungeons.gen.depths.DepthsLink joined = link();
+            if (joined != null && joined.physical()) {
+                // Keep the way down clear: nothing is placed at the tunnel's mouth or just inside the maze's door.
+                int[] m = joined.mouth();
+                for (int a = -2; a <= 2; a++) for (int b = -2; b <= 2; b++) points.add(new int[] {m[0] + a, m[1], m[2] + b});
+            }
             Set<String> bossRooms = new HashSet<>();
             for (JsonElement b : data.bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));
             com.ascensiondungeons.gen.depths.Depths depths = depths(seed);
@@ -316,9 +398,10 @@ public final class AuthoredLayout {
             }
             int[] arrival = null;
             String arrivalRoom = null;
-            if (depths != null) {
-                int[] o = depthsOrigin(), e = depths.entrance();
-                arrival = new int[] {e[0] + o[0], e[1] + o[1], e[2] + o[2]};
+            if (depths != null && !joined.physical()) {
+                // Detached Depths are reached by a teleporting stairway: a pad near the entrance and one where the party arrives.
+                int[] e = depths.entrance();
+                arrival = joined.toSchem(e[0], e[1], e[2]);
                 Room at = roomAt(seed, arrival[0], arrival[1], arrival[2]);
                 arrivalRoom = at == null ? "" : at.id;
             }

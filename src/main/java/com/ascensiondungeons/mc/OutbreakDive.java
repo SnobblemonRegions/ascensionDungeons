@@ -149,8 +149,12 @@ public final class OutbreakDive {
     private final Map<UUID, Double> toughness = new HashMap<>();
     private final ServerBossEvent outbreakBar, portalBar;
     private Vec3 portalCentre;
-    /** The stairway to the Depths and the spot it leads to (both null when the dungeon has no Depths). */
+    /** The teleporting stairway to detached Depths and the spot it leads to (both null when the Depths are joined by a tunnel, or absent). */
     private Vec3 descentCentre, returnCentre;
+    /** Where the tunnel to the Depths leaves the entrance room, and the maze's doorway at the bottom (both null unless joined by a tunnel). */
+    private Vec3 tunnelMouth, depthsDoor;
+    /** Players who are down in the Depths right now. */
+    private final Set<UUID> below = new HashSet<>();
     /** Players who just used the stairway and have not stepped off it yet, so they are not sent straight back. */
     private final Set<UUID> travelled = new HashSet<>();
     private boolean depthsAnnounced;
@@ -214,6 +218,17 @@ public final class OutbreakDive {
             if (pl.kind() == FeaturePlanner.Kind.RETURN) returnCentre = Vec3.atBottomCenterOf(pos);
             features.put(pos, new Feature(pl, pos));
         }
+        com.ascensiondungeons.gen.depths.DepthsLink link = host.layout().link();
+        if (link != null && link.physical()) {
+            // The Depths are walked to: signposts at the tunnel's mouth and at the maze's doorway, nothing to step on.
+            int[] mouth = link.mouth();
+            int[] door = link.toSchem(com.ascensiondungeons.gen.depths.Depths.doorX(host.layout().depths(host.run().seed()).params()), com.ascensiondungeons.gen.depths.Depths.STAND, 1);
+            BlockPos mouthPos = host.world(mouth), doorPos = host.world(door);
+            tunnelMouth = Vec3.atBottomCenterOf(mouthPos);
+            depthsDoor = Vec3.atBottomCenterOf(doorPos);
+            features.put(mouthPos, new Feature(new FeaturePlanner.Placement(FeaturePlanner.Kind.DESCENT, null, "", mouth), mouthPos));
+            features.put(doorPos, new Feature(new FeaturePlanner.Placement(FeaturePlanner.Kind.RETURN, null, "", door), doorPos));
+        }
         if (portalCentre == null) throw new IllegalStateException("no room for an extraction portal");
         outbreakBar = new ServerBossEvent(Component.literal("Outbreak"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.NOTCHED_6);
         portalBar = new ServerBossEvent(Component.literal("Extraction portal"), BossEvent.BossBarColor.BLUE, BossEvent.BossBarOverlay.PROGRESS);
@@ -225,10 +240,16 @@ public final class OutbreakDive {
     public int stage() { return clock == null ? 0 : clock.stage(now); }
     public boolean settled(UUID player) { return settled.contains(player); }
     public Vec3 portalCentre() { return portalCentre; }
-    /** The stairway to the Depths, or null when the dungeon has none. */
+    /** The teleporting stairway to detached Depths, or null (the Depths are joined by a tunnel, or there are none). */
     public Vec3 descentCentre() { return descentCentre; }
-    /** Where the stairway leads, in the Depths, or null. */
+    /** Where the teleporting stairway leads, in the Depths, or null. */
     public Vec3 returnCentre() { return returnCentre; }
+    /** Where the tunnel down to the Depths leaves the entrance room, or null when they are not joined by one. */
+    public Vec3 tunnelMouth() { return tunnelMouth; }
+    /** The maze's doorway at the bottom of the tunnel, or null. */
+    public Vec3 depthsDoor() { return depthsDoor; }
+    /** Whether this player is down in the Depths. */
+    public boolean inDepths(UUID player) { return below.contains(player); }
     private int tier() { return params.zoneTier(baseTier, stage()); }
     private UUID runId() { return host.run().id(); }
 
@@ -243,11 +264,12 @@ public final class OutbreakDive {
                 + " features=" + features.size() + " settled=" + settled.size();
     }
 
-    /** Operator aid: one line per feature, "KIND rarity x y z". */
+    /** Operator aid: one line per feature, "KIND rarity x y z", then "depths" for one down in the Depths and "used" for a spent one. */
     public List<String> featureLines() {
         List<String> out = new ArrayList<>();
         for (Feature f : features.values())
-            out.add(f.kind + " " + (f.rarity == null ? "-" : f.rarity.name()) + " " + f.pos.getX() + " " + f.pos.getY() + " " + f.pos.getZ() + (f.used ? " used" : ""));
+            out.add(f.kind + " " + (f.rarity == null ? "-" : f.rarity.name()) + " " + f.pos.getX() + " " + f.pos.getY() + " " + f.pos.getZ()
+                    + (AuthoredLayout.inDepths(roomOf(Vec3.atBottomCenterOf(f.pos))) ? " depths" : "") + (f.used ? " used" : ""));
         return out;
     }
 
@@ -275,6 +297,8 @@ public final class OutbreakDive {
             host.say("An Outbreak is building here. The longer you stay, the fiercer it gets and the more you carry out.", ChatFormatting.GOLD);
             host.say("Loot is yours only once it is banked at a checkpoint or carried out through the extraction portal near the entrance.", ChatFormatting.GRAY);
             host.say("Leaving has a price: beat the portal's gatekeeper, which grows with the Outbreak, or pay a toll of " + tollPercent + "% of your unbanked loot.", ChatFormatting.GRAY);
+            if (tunnelMouth != null)
+                host.say("A tunnel leads out of this room and down to the Depths: a maze that is different on every dive, with most of the chests.", ChatFormatting.GRAY);
         }
         // Anyone who walked out or dropped off without extracting keeps only what they banked.
         for (Map.Entry<UUID, Run.Member> e : host.run().members().entrySet())
@@ -298,6 +322,7 @@ public final class OutbreakDive {
         }
 
         stairwayTick(players);
+        if (tunnelMouth != null && now % 10 == 0) depthsTick(players);
 
         if (!bossDown && !players.isEmpty() && now >= nextWaveAt) {
             enemies.values().removeIf(en -> !en.mob.isAlive());
@@ -329,6 +354,25 @@ public final class OutbreakDive {
                 host.say("The Depths: a maze that is different on every dive, with most of the dungeon's chests. The way back up is where you arrived, and the extraction portal is up there.", ChatFormatting.GOLD);
             }
             p.displayClientMessage(Component.literal(down ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
+        }
+    }
+
+    /** Joined Depths: notices who has walked down into the maze and who has come back up. */
+    private void depthsTick(List<ServerPlayer> players) {
+        for (ServerPlayer p : players) {
+            UUID id = p.getUUID();
+            if (settled.contains(id)) { below.remove(id); continue; }
+            int[] c = host.schem(p);
+            AuthoredLayout.Room room = host.layout().roomAt(host.run().seed(), c[0], c[1], c[2]);
+            if (room == null) continue;                                   // in the tunnel, on the stairway or between rooms: no change
+            boolean deep = AuthoredLayout.inDepths(room);
+            if (deep == below.contains(id)) continue;
+            if (deep) below.add(id); else below.remove(id);
+            if (deep && !depthsAnnounced) {
+                depthsAnnounced = true;
+                host.say("The Depths: a maze that is different on every dive, with most of the dungeon's chests. The only way out is back up the stairway, and the extraction portal is up there.", ChatFormatting.GOLD);
+            }
+            p.displayClientMessage(Component.literal(deep ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
         }
     }
 
@@ -975,14 +1019,14 @@ public final class OutbreakDive {
                     level.sendParticles(open ? ParticleTypes.END_ROD : ParticleTypes.PORTAL, portalCentre.x, portalCentre.y + (open ? 1.5 : 0.6), portalCentre.z, open ? 30 : 12, 0.5, open ? 1.2 : 0.4, 0.5, 0.02);
                 }
                 case DESCENT -> {
-                    text = "Stairway down to the Depths";
+                    text = tunnelMouth != null ? "Tunnel down to the Depths" : "Stairway down to the Depths";
                     colour = 0xFFB347;
                     level.sendParticles(ParticleTypes.REVERSE_PORTAL, f.pos.getX() + 0.5, f.pos.getY() + 0.6, f.pos.getZ() + 0.5, 10, 0.4, 0.4, 0.4, 0.02);
                 }
                 case RETURN -> {
-                    text = "Way back up";
+                    text = tunnelMouth != null ? "Way back up to the dungeon" : "Way back up";
                     colour = 0xFFB347;
-                    level.sendParticles(ParticleTypes.REVERSE_PORTAL, f.pos.getX() + 0.5, f.pos.getY() + 0.6, f.pos.getZ() + 0.5, 10, 0.4, 0.4, 0.4, 0.02);
+                    if (tunnelMouth == null) level.sendParticles(ParticleTypes.REVERSE_PORTAL, f.pos.getX() + 0.5, f.pos.getY() + 0.6, f.pos.getZ() + 0.5, 10, 0.4, 0.4, 0.4, 0.02);
                 }
                 case ALTAR -> { text = f.used ? "Curse Altar (spent)" : "Curse Altar: touch to enrage the Outbreak"; colour = f.used ? 0x777777 : 0xC050FF; }
                 case TIMER_CHEST -> {

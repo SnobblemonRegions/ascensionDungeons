@@ -17,6 +17,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.WorldGenRegion;
 import net.minecraft.world.RandomizableContainer;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LevelHeightAccessor;
 import net.minecraft.world.level.NoiseColumn;
 import net.minecraft.world.level.StructureManager;
@@ -57,8 +58,12 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
     private final int ox, oy, oz;
     /** This run's procedural Depths (null when the dungeon has none), where its corner is in the world, and its blocks by role. */
     private final com.ascensiondungeons.gen.depths.Depths depths;
-    private final int dx0, dy0, dz0;
+    /** How the Depths join the dungeon: where the maze sits, and the tunnel and stairway blocks. */
+    private final com.ascensiondungeons.gen.depths.DepthsLink link;
     private final BlockState[] depthBlocks;
+    /** The tunnel and stairway blocks, by chunk, as {world x, world y, world z, role}. */
+    private final java.util.Map<Long, java.util.List<int[]>> linkBlocks = new java.util.HashMap<>();
+    private final int minX, minZ, maxX, maxZ;
 
     public AuthoredChunkGenerator(Holder<Biome> biome, String dungeon, long seed) {
         super(new FixedBiomeSource(biome));
@@ -77,11 +82,19 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
         }
         // Without Lootr there is no Outbreak dive, so no Depths either (see OutbreakDive.lootrInstalled).
         this.depths = OutbreakDive.lootrInstalled() ? layout.depths(seed) : null;
-        int[] o = layout.depthsOrigin();
-        this.dx0 = ox + o[0];
-        this.dy0 = oy + o[1];
-        this.dz0 = oz + o[2];
-        this.depthBlocks = new BlockState[6];
+        this.link = depths == null ? null : layout.link();
+        int x1 = 0, z1 = 0, x2 = layout.width() - 1, z2 = layout.length() - 1;
+        if (link != null) {
+            int[] reach = link.reach();
+            x1 = Math.min(x1, reach[0]); z1 = Math.min(z1, reach[1]); x2 = Math.max(x2, reach[2]); z2 = Math.max(z2, reach[3]);
+            for (var e : link.overrides().entrySet()) {
+                int[] c = com.ascensiondungeons.gen.depths.DepthsLink.unkey(e.getKey());
+                int wx = ox + c[0], wz = oz + c[2];
+                linkBlocks.computeIfAbsent(ChunkPos.asLong(wx >> 4, wz >> 4), k -> new java.util.ArrayList<>()).add(new int[] {wx, oy + c[1], wz, e.getValue()});
+            }
+        }
+        this.minX = ox + x1; this.minZ = oz + z1; this.maxX = ox + x2; this.maxZ = oz + z2;
+        this.depthBlocks = new BlockState[7];
         if (depths != null) {
             String[] p = layout.depthsPalette();
             depthBlocks[com.ascensiondungeons.gen.depths.Depths.WALL] = state(p[0]);
@@ -90,16 +103,35 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
             depthBlocks[com.ascensiondungeons.gen.depths.Depths.PILLAR] = state(p[3]);
             depthBlocks[com.ascensiondungeons.gen.depths.Depths.AIR] = Blocks.AIR.defaultBlockState();
             depthBlocks[com.ascensiondungeons.gen.depths.Depths.LIGHT] = Blocks.LIGHT.defaultBlockState().setValue(LightBlock.LEVEL, 13);
+            // The stairway's half steps: the first of the dungeon's slabs that this game has; with none, the cell stays open.
+            BlockState step = Blocks.AIR.defaultBlockState();
+            for (String name : layout.depthsSteps()) {
+                ResourceLocation id = ResourceLocation.tryParse(name);
+                if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) continue;
+                net.minecraft.world.level.block.Block block = BuiltInRegistries.BLOCK.get(id);
+                if (block instanceof net.minecraft.world.level.block.SlabBlock) { step = block.defaultBlockState(); break; }
+            }
+            depthBlocks[com.ascensiondungeons.gen.depths.DepthsLink.STEP] = step;
         }
     }
 
     /** The block of the Depths at a world position, or null outside them. */
     private BlockState depthsBlock(int x, int y, int z) {
         if (depths == null) return null;
-        int lx = x - dx0, ly = y - dy0, lz = z - dz0;
-        if (lx < 0 || lz < 0 || ly < 0 || lx >= depths.sizeX() || lz >= depths.sizeZ() || ly >= com.ascensiondungeons.gen.depths.Depths.HEIGHT) return null;
-        return depthBlocks[depths.role(lx, ly, lz)];
+        int[] l = link.toLocal(x - ox, y - oy, z - oz);
+        if (l[0] < 0 || l[2] < 0 || l[1] < 0 || l[0] >= depths.sizeX() || l[2] >= depths.sizeZ() || l[1] >= com.ascensiondungeons.gen.depths.Depths.HEIGHT) return null;
+        return depthBlocks[depths.role(l[0], l[1], l[2])];
     }
+
+    /** The tunnel or stairway block at a world position, or null where the link changes nothing. */
+    private BlockState linkBlock(int x, int y, int z) {
+        if (link == null) return null;
+        Byte role = link.override(x - ox, y - oy, z - oz);
+        return role == null ? null : depthBlocks[role];
+    }
+
+    /** The lowest and highest world y the Depths occupy. */
+    private int depthsMinY() { return oy + link.toSchem(0, 0, 0)[1]; }
 
     public AuthoredLayout layout() { return layout; }
 
@@ -107,11 +139,9 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
     public int[] toSchematic(BlockPos p) { return new int[] {p.getX() - ox, p.getY() - oy, p.getZ() - oz}; }
     public BlockPos worldEntry() { return toWorld(layout.data().entry); }
     /** The level's border is centred on, and sized to hold, the authored dungeon and the Depths together. */
-    private double spanX() { return depths == null ? layout.width() : Math.max(layout.width(), depths.sizeX()); }
-    private double spanZ() { return depths == null ? layout.length() : layout.length() + AuthoredLayout.DEPTHS_GAP + depths.sizeZ(); }
-    public double centreX() { return ox + spanX() / 2.0; }
-    public double centreZ() { return oz + spanZ() / 2.0; }
-    public double borderSize() { return Math.max(spanX(), spanZ()) + 48; }
+    public double centreX() { return (minX + maxX + 1) / 2.0; }
+    public double centreZ() { return (minZ + maxZ + 1) / 2.0; }
+    public double borderSize() { return Math.max(maxX - minX + 1, maxZ - minZ + 1) + 48; }
 
     @Override protected MapCodec<? extends ChunkGenerator> codec() { return CODEC; }
     @Override public int getGenDepth() { return 384; }
@@ -130,20 +160,23 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         int x0 = chunk.getPos().getMinBlockX(), z0 = chunk.getPos().getMinBlockZ();
         for (int x = x0; x < x0 + 16; x++) for (int z = z0; z < z0 + 16; z++) {
-            if (depths != null && z >= dz0) {
-                for (int ly = 0; ly < com.ascensiondungeons.gen.depths.Depths.HEIGHT; ly++) {
-                    BlockState s = depthsBlock(x, dy0 + ly, z);
-                    if (s != null && !s.isAir()) chunk.setBlockState(pos.set(x, dy0 + ly, z), s, false);
-                }
-                continue;
-            }
             int sx = x - ox, sz = z - oz;
-            if (sx < 0 || sz < 0 || sx >= layout.width() || sz >= layout.length()) continue;
-            for (int sy = 0; sy < layout.height(); sy++) {
-                BlockState s = block(sx, sy, sz);
-                if (!s.isAir()) chunk.setBlockState(pos.set(x, sy + oy, z), s, false);
+            if (sx >= 0 && sz >= 0 && sx < layout.width() && sz < layout.length()) {
+                for (int sy = 0; sy < layout.height(); sy++) {
+                    BlockState s = block(sx, sy, sz);
+                    if (!s.isAir()) chunk.setBlockState(pos.set(x, sy + oy, z), s, false);
+                }
+            } else if (depths != null) {
+                int y0 = depthsMinY();
+                for (int ly = 0; ly < com.ascensiondungeons.gen.depths.Depths.HEIGHT; ly++) {
+                    BlockState s = depthsBlock(x, y0 + ly, z);
+                    if (s != null && !s.isAir()) chunk.setBlockState(pos.set(x, y0 + ly, z), s, false);
+                }
             }
         }
+        // The tunnel out of the entrance room and the stairway down go in last: they cut through the dungeon's own wall.
+        java.util.List<int[]> cut = linkBlocks.get(chunk.getPos().toLong());
+        if (cut != null) for (int[] b : cut) chunk.setBlockState(pos.set(b[0], b[1], b[2]), depthBlocks[b[3]], false);
         Heightmap.primeHeightmaps(chunk, java.util.EnumSet.of(Heightmap.Types.WORLD_SURFACE_WG, Heightmap.Types.OCEAN_FLOOR_WG));
         return CompletableFuture.completedFuture(chunk);
     }
@@ -170,7 +203,8 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
         int sx = x - ox, sz = z - oz;
         for (int i = 0; i < out.length; i++) {
             int sy = i + min - oy;
-            BlockState deep = depthsBlock(x, i + min, z);
+            BlockState deep = linkBlock(x, i + min, z);
+            if (deep == null) deep = depthsBlock(x, i + min, z);
             out[i] = deep != null ? deep : sx >= 0 && sz >= 0 && sx < layout.width() && sz < layout.length() && sy >= 0 && sy < layout.height()
                     ? block(sx, sy, sz) : Blocks.AIR.defaultBlockState();
         }

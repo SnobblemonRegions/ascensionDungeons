@@ -57,10 +57,13 @@ _Avoid_: tax, fee.
 **Gatekeeper**: The boss a player calls out at the portal, drawn from the dungeon's `boss` pool. It grows with the Outbreak stage and with every gatekeeper already beaten. When it falls the portal opens free for everyone for a short window.
 _Avoid_: boss (the dungeon's own final boss is "the boss"), guardian (a strongbox has guardians).
 
-**The Depths**: The procedural maze under a dive, different every run, built from the dungeon's own blocks. Most of a run's chests are there.
+**The Depths**: The procedural maze under a dive, different every run, built from the dungeon's own blocks and joined to the entrance room by a tunnel and a stairway. Most of a run's chests are there.
 _Avoid_: basement, lower level, procedural wing.
 
-**Stairway**: The spot beside the entrance that carries a player down to the Depths. The spot where they arrive carries them back up.
+**Tunnel**: The opening cut through a wall of the entrance room that leads to the stairway. In the same place every run.
+
+**Stairway**: The stairs from the tunnel down to the Depths' doorway. Players and enemies walk it; nothing teleports.
+_Avoid_: using it for the teleporting pads of **detached Depths**, the fallback when a dungeon has no safe wall to cut.
 
 **Knock-out**: What a lethal hit does in a dive: the player is healed, loses their unbanked haul and is sent home. Nobody dies in a dive.
 _Avoid_: death, wipe.
@@ -87,7 +90,7 @@ _Avoid_: ability (a Pokémon ability, and AscensionLib avoids it too), skill.
 
 ## Features
 
-**Feature**: Something a dive places for one run from its seed: a chest, an altar, the portal, the stairway.
+**Feature**: Something a dive places for one run from its seed: a chest, an altar, the portal.
 
 **Rarity chest**: A loot chest of a rarity: Common, Uncommon, Rare, Epic. Colours follow AscensionLib's rarity palette. Not an Ascension rarity of a Pokémon.
 

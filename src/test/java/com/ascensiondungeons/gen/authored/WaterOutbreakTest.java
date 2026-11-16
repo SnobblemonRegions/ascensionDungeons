@@ -2,11 +2,13 @@ package com.ascensiondungeons.gen.authored;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.ascensiondungeons.gen.depths.DepthsLink;
 import com.ascensiondungeons.outbreak.FeaturePlanner;
 import com.ascensiondungeons.outbreak.OutbreakClock;
 import com.ascensiondungeons.outbreak.Spell;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -76,11 +78,12 @@ class WaterOutbreakTest {
         for (String id : TYPES) {
             AuthoredLayout layout = AuthoredLayout.get(id);
             JsonObject f = Jx.o(layout.outbreak(), "features");
-            // the portal, the stairway down and the way back up, plus everything the settings ask for
-            int wanted = 3 + Jx.i(f, "chests", 0) + Jx.i(f, "outbreakChests", 0) + Jx.i(f, "timerChests", 0) + Jx.i(f, "strongboxes", 0) + Jx.i(f, "altars", 0);
+            DepthsLink link = layout.link();
+            // the portal and everything the settings ask for; detached Depths add the stairway down and the way back up
+            int wanted = (link.physical() ? 1 : 3) + Jx.i(f, "chests", 0) + Jx.i(f, "outbreakChests", 0) + Jx.i(f, "timerChests", 0) + Jx.i(f, "strongboxes", 0)
+                    + Jx.i(f, "altars", 0);
             Set<String> bossRooms = new HashSet<>();
             for (JsonElement b : layout.data().bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));
-            int[] o = layout.depthsOrigin();
             for (long seed = 1; seed <= 40; seed++) {
                 List<FeaturePlanner.Placement> plan = layout.features(seed);
                 assertEquals(wanted, plan.size(), id + " seed " + seed);
@@ -96,12 +99,15 @@ class WaterOutbreakTest {
                     assertTrue(room.contains(c[0], c[1], c[2]), where + " is inside " + room.id);
                     if (AuthoredLayout.inDepths(room)) {
                         deep++;
-                        assertTrue(depths.open(c[0] - o[0], c[1] - o[1], c[2] - o[2]), where + " feet");
-                        assertFalse(depths.open(c[0] - o[0], c[1] - o[1] - 1, c[2] - o[2]), where + " floor");
+                        int[] l = link.toLocal(c[0], c[1], c[2]);
+                        assertTrue(depths.open(l[0], l[1], l[2]), where + " feet");
+                        assertFalse(depths.open(l[0], l[1] - 1, l[2]), where + " floor");
                     } else {
                         assertEquals("minecraft:air", layout.stateAt(c[0], c[1], c[2]), where + " feet");
                         assertNotEquals("minecraft:air", layout.stateAt(c[0], c[1] - 1, c[2]), where + " floor");
+                        assertNull(link.override(c[0], c[1], c[2]), where + " is not in the tunnel");
                     }
+                    assertTrue(layout.passable(seed, c[0], c[1], c[2]) && !layout.passable(seed, c[0], c[1] - 1, c[2]), where + " stands on ground");
                     assertFalse(bossRooms.contains(p.room()), id + ": nothing in the boss's room");
                 }
                 assertTrue(deep >= wanted / 2, id + " seed " + seed + ": most features are down in the Depths (" + deep + " of " + wanted + ")");
@@ -110,28 +116,17 @@ class WaterOutbreakTest {
     }
 
     @Test
-    void everyDiveHasDepthsReachedByAStairwayNextToTheEntrance() {
+    void everyDiveHasABigMazeThatChangesFromRunToRun() {
         for (String id : TYPES) {
             AuthoredLayout layout = AuthoredLayout.get(id);
             assertTrue(layout.hasDepths(), id);
-            AuthoredLayout.Room home = layout.entryRoom();
             for (long seed = 1; seed <= 10; seed++) {
                 var depths = layout.depths(seed);
                 assertEquals(layout.data().rooms.length + depths.rooms().size(), layout.rooms(seed).length, id);
                 assertTrue(depths.rooms().size() >= 30, id + " has a big maze: " + depths.rooms().size() + " rooms");
-                FeaturePlanner.Placement descent = null, back = null, portal = null;
-                for (FeaturePlanner.Placement p : layout.features(seed)) {
-                    if (p.kind() == FeaturePlanner.Kind.DESCENT) descent = p;
-                    if (p.kind() == FeaturePlanner.Kind.RETURN) back = p;
-                    if (p.kind() == FeaturePlanner.Kind.PORTAL) portal = p;
-                }
-                assertNotNull(descent, id + " seed " + seed + " has a stairway");
-                assertNotNull(back, id + " seed " + seed + " has a way back");
-                assertEquals(home.id, descent.room(), id + ": the stairway is in the entrance room");
-                assertEquals(home.id, portal.room());
-                int[] o = layout.depthsOrigin(), e = depths.entrance();
-                assertArrayEquals(new int[] {e[0] + o[0], e[1] + o[1], e[2] + o[2]}, back.cell(), id + ": the way back is where the party arrives");
-                assertTrue(AuthoredLayout.inDepths(layout.roomAt(seed, back.cell()[0], back.cell()[1], back.cell()[2])));
+                assertEquals(layout.link().physical(), depths.hasDoor(), id + ": a joined maze has a doorway, a detached one is sealed");
+                int[] e = depths.entrance(), at = layout.link().toSchem(e[0], e[1], e[2]);
+                assertTrue(AuthoredLayout.inDepths(layout.roomAt(seed, at[0], at[1], at[2])), id + ": the maze's first room is a Depths room");
             }
             // a different run is a different maze
             var a = layout.depths(101);
@@ -140,6 +135,70 @@ class WaterOutbreakTest {
             for (int x = 0; x < a.sizeX() && !differs; x += 5) for (int z = 0; z < a.sizeZ() && !differs; z += 5) differs = a.role(x, 2, z) != b.role(x, 2, z);
             assertTrue(differs, id);
         }
+    }
+
+    /** The point of joining them: from where the party lands, a player can walk out through the tunnel, down the stairway and into the maze. */
+    @Test
+    void everyTypeDungeonIsJoinedToItsDepthsByATunnelYouCanWalk() {
+        StringBuilder report = new StringBuilder();
+        for (String id : TYPES) {
+            AuthoredLayout layout = AuthoredLayout.get(id);
+            DepthsLink link = layout.link();
+            report.append(String.format("%-9s %s%n", id, link.physical() ? link.side() + ", tunnel " + link.tunnelLength() + " blocks, mouth " + Arrays.toString(link.mouth())
+                    : "DETACHED (teleporting stairway)"));
+            if (!link.physical()) continue;
+            assertSame(link, layout.link(), id + ": the way down is in the same place every run");
+            int[] m = link.mouth();
+            assertEquals(layout.entryRoom(), layout.roomAt(m[0], m[1], m[2]), id + ": the tunnel starts in the entrance room");
+            for (long seed = 1; seed <= 6; seed++) {
+                // No stairway pads: the walk replaces them.
+                for (FeaturePlanner.Placement p : layout.features(seed))
+                    assertTrue(p.kind() != FeaturePlanner.Kind.DESCENT && p.kind() != FeaturePlanner.Kind.RETURN, id + " seed " + seed);
+                int[] e = layout.depths(seed).entrance(), goal = link.toSchem(e[0], e[1], e[2]);
+                int steps = walk(layout, seed, layout.data().entry, goal);
+                assertTrue(steps > 0, id + " seed " + seed + ": the Depths can be walked to from the entrance");
+                assertTrue(steps >= DepthsLink.GAP, id + ": the walk goes down the stairway (" + steps + " steps)");
+                assertTrue(walk(layout, seed, goal, layout.data().entry) > 0, id + " seed " + seed + ": and back up again");
+                // and the whole maze hangs off it: the far corner room is reachable from the entrance too
+                var rooms = layout.depths(seed).rooms();
+                int[] far = rooms.get(rooms.size() - 1).cells().get(0), farAt = link.toSchem(far[0], far[1], far[2]);
+                assertTrue(walk(layout, seed, layout.data().entry, farAt) > 0, id + " seed " + seed + ": the last room of the maze is reachable");
+            }
+        }
+        System.out.print(report);
+        assertFalse(report.toString().contains("DETACHED"), "every type dungeon has a real way down:\n" + report);
+    }
+
+    /**
+     * Steps of the shortest walk between two standing cells, or -1. A walker is two blocks tall, moves one block at a time on
+     * the four compass points, climbs one block (with headroom to jump) and drops up to three.
+     */
+    static int walk(AuthoredLayout layout, long seed, int[] from, int[] to) {
+        java.util.Map<Long, Integer> seen = new java.util.HashMap<>();
+        java.util.ArrayDeque<int[]> queue = new java.util.ArrayDeque<>();
+        seen.put(DepthsLink.key(from[0], from[1], from[2]), 0);
+        queue.add(from);
+        int[][] steps = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        while (!queue.isEmpty()) {
+            int[] at = queue.poll();
+            int n = seen.get(DepthsLink.key(at[0], at[1], at[2]));
+            if (at[0] == to[0] && at[1] == to[1] && at[2] == to[2]) return n;
+            for (int[] s : steps) {
+                int x = at[0] + s[0], z = at[2] + s[1];
+                for (int dy = 1; dy >= -3; dy--) {
+                    int y = at[1] + dy;
+                    if (!layout.passable(seed, x, y, z) || !layout.passable(seed, x, y + 1, z) || layout.passable(seed, x, y - 1, z)) continue;
+                    if (dy == 1 && !layout.passable(seed, at[0], at[1] + 2, at[2])) continue;       // no room to jump
+                    boolean clear = true;                                                       // dropping: the column above the landing is open
+                    for (int yy = y + 2; yy <= at[1] + 1 && clear; yy++) clear = layout.passable(seed, x, yy, z);
+                    if (!clear) continue;
+                    long k = DepthsLink.key(x, y, z);
+                    if (seen.putIfAbsent(k, n + 1) == null) queue.add(new int[] {x, y, z});
+                    break;
+                }
+            }
+        }
+        return -1;
     }
 
     @Test
@@ -155,6 +214,24 @@ class WaterOutbreakTest {
         assertFalse(AuthoredLayout.buildingBlock("minecraft:oak_stairs"));
         assertFalse(AuthoredLayout.buildingBlock("minecraft:water"));
         assertTrue(AuthoredLayout.buildingBlock("minecraft:stone_bricks"));
+    }
+
+    @Test
+    void theStairwaysStepsAreSlabsOfTheDungeonsOwn() {
+        assertEquals("minecraft:stone_brick_slab", AuthoredLayout.slabOf("minecraft:stone_bricks"));
+        assertEquals("minecraft:deepslate_tile_slab", AuthoredLayout.slabOf("minecraft:deepslate_tiles"));
+        assertEquals("minecraft:oak_slab", AuthoredLayout.slabOf("minecraft:oak_planks"));
+        assertEquals("minecraft:andesite_slab", AuthoredLayout.slabOf("minecraft:andesite"));
+        for (String id : TYPES) {
+            AuthoredLayout layout = AuthoredLayout.get(id);
+            List<String> steps = layout.depthsSteps();
+            // the slab forms of the four Depths blocks come first, and there is always a plain one to fall back on
+            String[] p = layout.depthsPalette();
+            for (int i = 0; i < 4; i++) assertTrue(steps.indexOf(AuthoredLayout.slabOf(p[i])) <= i, id + " " + steps);
+            assertTrue(steps.contains("minecraft:smooth_stone_slab"), id);
+            for (String s : steps) assertTrue(s.endsWith("_slab"), id + " " + s);
+            assertEquals(steps.size(), new HashSet<>(steps).size(), id + ": no slab is listed twice");
+        }
     }
 
     @Test

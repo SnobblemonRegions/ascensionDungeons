@@ -1,24 +1,27 @@
 // Live check of an Outbreak dive in the water dungeon, played by a mineflayer bot against a real dev server.
 //
 // It loots rarity chests, banks at a checkpoint, uses a curse altar, waits for a timer chest, opens an outbreak chest and a
-// strongbox, takes the stairway down to the Depths and back, reads the extraction screen and pays the 35% toll; then it checks a
+// strongbox, walks out through the tunnel and down the stairway into the Depths and back up again (its own client physics, no
+// teleport), reads the extraction screen and pays the 35% toll; then it checks a
 // knock-out, a walk-out, a disconnect, and beating the gatekeeper.
 //
 // How to run (the bot library cannot parse Cobblemon's packets, so the server runs without Cobblemon and the dungeon uses its
 // vanilla fallback mobs; Pokémon combat, aggro for Pokémon and AscensionLib payouts are NOT covered by this check):
-//   1. npm install mineflayer@4 in some folder; copy this file there.
+//   1. npm install mineflayer@4 mineflayer-pathfinder in some folder; copy this file there.
 //   2. In build.gradle, temporarily change Cobblemon's `modImplementation` to `modCompileOnly` (do not commit that).
 //   3. run/server.properties: online-mode=false, enforce-secure-profile=false. run/ops.json: op "RunBot"
 //      (offline UUID 221e52a3-45e9-3caa-ab49-a8d5537a85c0, level 4). run/eula.txt: eula=true.
 //   4. JAVA_TOOL_OPTIONS="-Dascensiondungeons.outbreakSpeed=12" ./gradlew runServer -PcobbleRaidsJar=<CobbleRaids jar>
 //   5. node dive_bot.js   (prints PASS/FAIL lines and "N/N passed", then stops the server)
 const mineflayer = require('mineflayer');
+const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const results = [];
 function check(name, ok, detail) { results.push(ok); console.log((ok ? 'PASS ' : 'FAIL ') + name + (detail ? '  -> ' + String(detail).slice(0, 260) : '')); }
 function connect() {
   return new Promise(resolve => {
     const bot = mineflayer.createBot({ host: '127.0.0.1', port: 25565, username: 'RunBot', version: '1.21.1' });
+    bot.loadPlugin(pathfinder);
     bot.log = []; bot.bars = [];
     bot.on('message', m => bot.log.push(m.toString()));
     bot.on('actionBar', m => bot.bars.push(m.toString()));
@@ -43,6 +46,23 @@ async function use(bot, x, y, z) {   // right-click a block, standing next to it
     await sleep(600);
   }
   return opened;
+}
+// Walk there on foot, the way a player does: no digging, no building, no teleport. Counts any move the server forced on the bot.
+async function walkTo(bot, x, y, z, range, ms = 150000) {
+  const mv = new Movements(bot);
+  mv.canDig = false; mv.allow1by1towers = false; mv.allowParkour = false; mv.scafoldingBlocks = [];
+  bot.pathfinder.setMovements(mv);
+  const from = bot.entity.position.clone();
+  let forced = 0, lowest = from.y;
+  const onForced = () => forced++, onMove = () => { lowest = Math.min(lowest, bot.entity.position.y); };
+  bot.on('forcedMove', onForced); bot.on('move', onMove);
+  let why = '';
+  try {
+    await Promise.race([bot.pathfinder.goto(new goals.GoalNear(x, y, z, range)), sleep(ms).then(() => { throw new Error('timed out'); })]);
+  } catch (e) { why = String(e && e.message || e); try { bot.pathfinder.setGoal(null); } catch (e2) {} }
+  bot.removeListener('forcedMove', onForced); bot.removeListener('move', onMove);
+  const at = bot.entity.position;
+  return { ok: !why, why, forced, from: from.floored().toString(), at: at.floored().toString(), far: Math.round(from.distanceTo(at)), drop: Math.round(from.y - lowest) };
 }
 async function inv(bot) {
   const r = await cmd(bot, '/data get entity @s Inventory', 1200);
@@ -69,7 +89,7 @@ async function startRun(bot) {
   await sleep(3500);
   await cmd(bot, '/effect give @s minecraft:resistance infinite 255 true', 500);
   const d = await cmd(bot, '/dungeon dive', 1500);
-  const feats = [...d.matchAll(/feature (\w+) (\S+) (-?\d+) (-?\d+) (-?\d+)/g)].map(m => ({ kind: m[1], rarity: m[2], x: +m[3], y: +m[4], z: +m[5] }));
+  const feats = [...d.matchAll(/feature (\w+) (\S+) (-?\d+) (-?\d+) (-?\d+)( depths)?/g)].map(m => ({ kind: m[1], rarity: m[2], x: +m[3], y: +m[4], z: +m[5], depths: !!m[6] }));
   return { request: r, describe: d, feats };
 }
 const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); const m = d.match(/stage=(\d+)/); return m ? +m[1] : -1; };
@@ -112,22 +132,26 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     const n2 = bot.log.length;
     opened = await use(bot, sb.x, sb.y, sb.z);
     check('A strongbox opens and wakes guardians', opened && bot.log.slice(n2).some(l => /strongbox wakes the dungeon/.test(l)));
-    // the Depths: down the stairway, loot a chest there, and back up
-    const descent = kinds('DESCENT')[0], back = kinds('RETURN')[0];
-    check('A the dive has a stairway and many more features than rooms above', !!descent && !!back && run.feats.length >= 30, run.feats.length + ' features');
-    let nb = bot.bars.length;
-    await cmd(bot, `/tp @s ${descent.x} ${descent.y} ${descent.z}`, 2500);
-    check('A the stairway carries the player down to the Depths', bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)) && bot.log.some(l => /The Depths: a maze/.test(l)), bot.bars.slice(-1)[0]);
+    // the Depths: walk out of the entrance room through the tunnel and down the stairway, loot a chest there, and walk back up
+    const mouth = kinds('DESCENT')[0], door = kinds('RETURN')[0];
+    check('A the dive has a tunnel to the Depths and many more features than rooms above', !!mouth && !!door && run.feats.length >= 30, run.feats.length + ' features');
     // chests[0] and chests[1] were opened above; Lootr rolls a chest once per player, so take one not yet opened
-    const deep = chests.slice(2).filter(c => c.z > back.z - 14);
+    const far = c => Math.abs(c.x - door.x) + Math.abs(c.z - door.z);
+    const deep = chests.slice(2).filter(c => c.depths).sort((a, b) => far(a) - far(b));
+    await cmd(bot, `/tp @s ${mouth.x} ${mouth.y} ${mouth.z}`, 2500);       // start at the tunnel's mouth, in the entrance room
+    let nb = bot.bars.length;
+    const down = await walkTo(bot, deep[0].x, deep[0].y, deep[0].z, 2);
+    check('A the player walks through the tunnel and down the stairway into the Depths, with no teleport',
+      down.ok && down.forced === 0 && down.drop >= 8 && bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)) && bot.log.some(l => /The Depths: a maze/.test(l)),
+      JSON.stringify(down));
     const before5 = await inv(bot);
     opened = await use(bot, deep[0].x, deep[0].y, deep[0].z);
     const after5 = await inv(bot);
     // count items, not stacks: new loot of a kind already carried merges into the stack that is there
     check('A a chest down in the Depths gives marked loot', opened && after5.markedTotal > before5.markedTotal, `${deep.length} unopened rarity chests are in the Depths`);
     nb = bot.bars.length;
-    await cmd(bot, `/tp @s ${back.x} ${back.y} ${back.z}`, 2500);
-    check('A the way back up returns the player', bot.bars.slice(nb).some(b => /climb back/.test(b)), bot.bars.slice(-1)[0]);
+    const up = await walkTo(bot, mouth.x, mouth.y, mouth.z, 1);
+    check('A the player walks back up the stairway to the entrance room, with no teleport', up.ok && up.forced === 0 && bot.bars.slice(nb).some(b => /climb back/.test(b)), JSON.stringify(up));
     // extraction: the screen shows exactly what the toll takes; pay it
     const portal = kinds('PORTAL')[0];
     const before4 = await inv(bot);

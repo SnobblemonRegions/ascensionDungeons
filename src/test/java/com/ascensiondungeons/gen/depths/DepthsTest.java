@@ -47,6 +47,30 @@ class DepthsTest {
     }
 
     @Test
+    void aDoorOpensTheEntranceRoomToTheNearEdgeAndNothingElse() {
+        for (long seed = 0; seed < 40; seed++) {
+            Depths d = Depths.generate(seed, P, true);
+            assertTrue(d.hasDoor());
+            int cx = Depths.doorX(P);
+            assertEquals(d.entrance()[0], cx);
+            int open = 0;
+            for (int x = 0; x < d.sizeX(); x++) for (int z = 0; z < d.sizeZ(); z++) for (int y = 0; y < Depths.HEIGHT; y++) {
+                boolean edge = x == 0 || z == 0 || x == d.sizeX() - 1 || z == d.sizeZ() - 1 || y == 0 || y == Depths.HEIGHT - 1;
+                if (!edge || !d.open(x, y, z)) continue;
+                open++;
+                assertEquals(0, z, "the only opening is in the near wall");
+                assertTrue(Math.abs(x - cx) <= 1 && y >= Depths.STAND && y < Depths.STAND + 4, "and it is the doorway: " + x + "," + y + "," + z);
+            }
+            assertEquals(12, open, "a doorway three wide and four high");
+            // the doorway leads on foot to the entrance room and so to everything
+            assertTrue(d.open(cx, Depths.STAND, 0) && !d.open(cx, Depths.STAND - 1, 0));
+            int[] w = d.walkability();
+            assertEquals(w[0], w[1], "seed " + seed);
+        }
+        assertFalse(Depths.generate(1, P).hasDoor());
+    }
+
+    @Test
     void theRoomCountFollowsOccupancyAndTheEntranceIsOnTheNearEdge() {
         Depths d = Depths.generate(7, P);
         assertEquals(Math.round(49 * 0.75), d.rooms().size());

@@ -35,10 +35,13 @@ it is to keep all of it: that is the decision the whole run builds up to.
 - **Spells.** A ring on the ground in the type's colour, then the hit; leave the ring to dodge. Three per type, named after moves,
   with twelve effects between them (pull, push, knock-up, slow, freeze, burn, poison, wither, blind, levitate, weaken, plain damage).
   Killing the caster cancels the cast.
-- **The Depths.** A stairway beside the entrance leads down to a procedural maze: about 37 rooms on a 7 x 7 grid, joined with loops,
-  in eight shapes (entrance hall, hall, pillars, cross, ring, aisles, dais, vault; dead ends are usually vaults), built from the
-  dungeon's own blocks and different every run. `docs/outbreak-depths-preview.png` shows two. Most of the run's chests are down
-  there. The spot where you arrive is the way back up; the portal is upstairs.
+- **The Depths.** A tunnel cut through a wall of the entrance room becomes a stairway of half-slab steps (no jumping) that descends
+  eight blocks into a procedural
+  maze: about 37 rooms on a 7 x 7 grid, joined with loops, in eight shapes (entrance hall, hall, pillars, cross, ring, aisles, dais,
+  vault; dead ends are usually vaults), built from the dungeon's own blocks and different every run.
+  `docs/outbreak-depths-preview.png` shows two. Most of the run's chests are down there. It is one connected place: players walk
+  down and back, and so can enemies. Nothing teleports. The tunnel is in the same spot every run, signposted in the entrance room,
+  and it is the only way out of the maze; the portal is upstairs.
 - **Chests**, placed fresh each run: 16 rarity chests (Common to Epic), 5 outbreak chests (their rarity grows a step per two stages
   until opened), 2 timer chests (sealed until stage 2), 3 strongboxes (Epic; opening one sends six guardians). Each has a coloured
   label, sparkles, a rarity floor block, its own loot table and, with the pack, its own model.
@@ -76,20 +79,23 @@ Pure logic, Minecraft-free (unit tested):
 | `outbreak/ExtractionPortal` | idle -> fight -> open -> idle; the window; gatekeeper strength |
 | `outbreak/Toll` | which items and how many wins the toll takes |
 | `outbreak/WavePlanner` | how many enemies a wave adds |
-| `outbreak/FeaturePlanner` | where a run's chests, altars, portal and stairway go, from the seed |
+| `outbreak/FeaturePlanner` | where a run's chests, altars and portal go, from the seed (and the stairway pads of detached Depths) |
 | `outbreak/ChestRarity`, `ChestLook` | the rarity ladder, colours, loot tables, pack model ids |
 | `outbreak/DiveSettlement` | groups players into the fewest `settleDungeonRun` calls |
 | `outbreak/Aggro` | six styles: who an enemy attacks, when it goes home |
 | `outbreak/Spell`, `Spell.Cast` | a telegraphed attack and its timing |
-| `gen/depths/Depths` | the procedural maze: grid, spanning tree plus loops, room shapes, lights, standing cells, a reachability proof |
+| `gen/depths/Depths` | the procedural maze: grid, spanning tree plus loops, room shapes, lights, standing cells, a doorway in its near wall, a reachability proof |
+| `gen/depths/DepthsLink` | how the maze is joined to a hand-built dungeon: finds a wall of the entrance room where a tunnel can go straight out, builds the tunnel and stairway, turns the maze to face the dungeon, converts between the two sets of coordinates |
 
 Thin game layer in `com.ascensiondungeons.mc`:
 
-- `OutbreakDive`: one per run. Boss bars, waves, spells, chests and altars, the stairway, the extraction window and gatekeeper,
-  settlement. It applies decisions from the pure classes and makes none of its own.
+- `OutbreakDive`: one per run. Boss bars, waves, spells, chests and altars, the signposts at the tunnel, noticing who is down in
+  the Depths, the extraction window and gatekeeper, settlement. It applies decisions from the pure classes and makes none of its own.
 - `TollMenu`: the extraction window. A plain six-row chest menu (no client mod); every click is answered and nothing moves.
-- `AuthoredLayout`: `outbreak()`, and per run seed `depths(seed)`, `rooms(seed)`, `features(seed)`, `depthsPalette()`.
-- `AuthoredChunkGenerator`: builds the Depths beside the authored dungeon and places feature blocks; sizes the world border.
+- `AuthoredLayout`: `outbreak()`, `link()` (once per dungeon), and per run seed `depths(seed)`, `rooms(seed)`, `features(seed)`,
+  `passable(seed, x, y, z)`, `depthsPalette()`.
+- `AuthoredChunkGenerator`: cuts the tunnel, builds the stairway and the Depths at the end of it, places feature blocks, and sizes
+  the world border to hold all of it.
 - `RunLoot` + `lootr/RunLootFilters`: marks chest loot at the source, clears or strips it, sweeps at login, finds hidden loot.
   `AuthoredPartyItems` covers party held items when Cobblemon is installed.
 - `AuthoredCombat` asks a `Targeting` hook for each hostile's target, so aggro styles apply to dungeon Pokémon.
@@ -120,6 +126,35 @@ filter that drops anything not a plain, full, inert block. Ice is hand-picked (i
 
 Exact for Pokémon (real-time combat asks the dive); approximated for vanilla fallback mobs by steering their own AI.
 
+## How the Depths are joined
+
+`DepthsLink.find` runs once per dungeon (not per run, so the way down never moves). From the entry cell and every standing cell
+of the entrance room it walks straight to each of the four walls and asks whether a tunnel three wide and three high can go
+from there to the edge of the schematic. A tunnel is refused if it or the ring of blocks around it would:
+
+- touch air that is not the entrance room's own (another room or a passage);
+- run beside water, lava, or anything that falls (sand, gravel);
+- cut a chest, lever, door or any other mechanism, a seal, or a cell a hazard or mechanic uses;
+- need more than 24 blocks of wall.
+
+Where the room's wall slopes or bulges (most of the entrance rooms are domes), the first six blocks may run beside the room's
+own air. Among the tunnels that are allowed, the shortest wins, with a penalty for starting on a ledge above the floor the party
+lands on or within six blocks of where it lands. Outside the schematic the stairway builds its own shell from the Depths'
+blocks: three wide, four high, level for two blocks, then one block down every two, eight down in all over 28 blocks, with a
+light every four. Each drop is split by a slab, so the walk is half a block at a time and nobody has to jump, up or down. The
+slab is the first that exists of: `depths.step` in `outbreak.json`, the slab forms of the four Depths blocks, the slabs the
+dungeon itself uses most, and smooth stone. The maze is turned so that its doorway faces the stairway. An accent frame marks the tunnel in the entrance room, and a floating label
+names it.
+
+All seventeen type dungeons get a tunnel this way: five to ten blocks long, out of the north or west wall of the entrance room.
+If a future dungeon had no safe place, `find` falls back to **detached** Depths with a teleporting stairway (two pads), which is
+how the first version worked; `"link": "pad"` under `depths` in `outbreak.json` forces that.
+
+Enemies need nothing special: waves spawn in whichever room the party is in, Depths rooms included, and the tunnel and stairway
+are ordinary walkable ground for them. An enemy sees 26 blocks, so one left in the entrance room follows a player down only
+while it can still see them. A Pokémon wider than the three-block tunnel cannot follow at all; waves still reach the party
+because they spawn where the party is.
+
 ## Chest models
 
 `tools/outbreak/make_chest_pack.py resourcepack [preview.png]` draws eleven original models and writes `resourcepack/`;
@@ -131,15 +166,21 @@ see a floating chorus fruit. A chest is always identifiable without it (label, s
 
 | What | How | Result |
 |---|---|---|
-| Rules and data | `./gradlew test` | 198 tests pass. Includes 300 seeds of Depths (every standing cell reachable, sealed shell, loops, lighting) and, for all 17 type dungeons, valid settings and full feature placement on sound ground for 40 seeds each |
-| Every type dungeon, whole mod set | `DUNGEONSPIKE_DIVE=all ./gradlew runServer` (`spike/DiveE2E`): a stand-in player joins through the normal login path and plays a short dive in each | 120/120: each dungeon starts, spawns Pokémon of its type, has Depths built from its palette, gives marked loot from a chest down there, shows the toll and lets the player out on paying it |
-| One long dive, whole mod set | `DUNGEONSPIKE_DIVE=1 ./gradlew runServer` (water) | 30/30: enemies are uncatchable, unbattleable Pokémon that hunt and hurt the player; stairway down and back; checkpoint; knock-out; loot hidden on a party Pokémon is banked, stripped or forfeit; the toll window showed 7 of 19 items and paying took exactly those; a 12-point hit cost a stage-0 gatekeeper 2; beating it opened the portal |
-| The same over the real protocol | `tools/outbreak/dive_bot.js`: a mineflayer bot, server without Cobblemon | 25/26 on the last full run. Over real packets the extraction window opened as a chest screen, showed 7 of 21 unbanked items, a click on a shown item moved nothing, paying took exactly those 7 and one win, and beating the gatekeeper let the player out with everything; marking, banking, altar, timer chest, outbreak chest, strongbox, the stairway both ways, knock-out, walk-out and the login sweep all pass. The one failure was the bot's own check on the Depths chest: it counted marked stacks, and the new loot merged into stacks it already held (the server log shows that chest opened and its loot marked). The check now counts items; the script has not been rerun since that one-line fix |
+| Rules and data | `./gradlew test` | 213 tests pass. Includes 300 seeds of Depths (every standing cell reachable, sealed shell, loops, lighting); the link (never breaks into another room, never beside water or sand, never through a mechanism, sloped walls, half steps); and, for all 17 type dungeons: valid settings, full feature placement on sound ground for 40 seeds each, a tunnel found, and a walk from the entry cell through the tunnel to the maze's first room, to its farthest room, and back |
+| Every type dungeon, whole mod set | `DUNGEONSPIKE_DIVE=all ./gradlew runServer` (`spike/DiveE2E`): a stand-in player joins through the normal login path and plays a short dive in each | 137/137. In each dungeon a wave of that type's Pokémon spawns; a walk is found through the blocks that are really in the world from where the player lands, through the tunnel, down eight half-slab steps and into the Depths, and the player is moved along it (53 to 72 blocks); the dive notices them arrive; a chest down there gives marked loot; the walk back up to the entrance room exists and is followed; the toll is shown and paying it lets the player out |
+| One long dive, whole mod set | `DUNGEONSPIKE_DIVE=1 ./gradlew runServer` (water) | 31/31: enemies are uncatchable, unbattleable Pokémon that hunt and hurt the player; the walk down and back; **a Pokémon that spawned in the entrance room chased the player down the stairway to its foot**; checkpoint; knock-out; loot hidden on a party Pokémon is banked, stripped or forfeit; the toll window shows exactly what paying takes; beating the gatekeeper opens the portal |
+| The same over the real protocol | `tools/outbreak/dive_bot.js`: a mineflayer bot with its own client physics and pathfinding, server without Cobblemon | 26/26. The bot **walked** from the tunnel's mouth down the stairway to a chest in the Depths (48 blocks, 8 down) and back up to the entrance room, and the server did not correct its position once either way. Over real packets the extraction window opened as a chest screen, showed 7 of 20 unbanked items, a click on a shown item moved nothing, paying took exactly those 7 and one win, and beating the gatekeeper let the player out with everything; marking, banking, altar, timer chest, outbreak chest, strongbox, knock-out, walk-out and the login sweep all pass |
 | Chest pack | `ChestLookTest` | ids in the pack match the code; every model and texture exists |
 
 Use `-Dascensiondungeons.outbreakSpeed=12` for the live checks or they take many minutes.
 
-**Not verified.** How any of it looks and feels in a real client. More than one player. A live AscensionLib (its jar needs a local
+One thing the bot found on the way: with full-block steps (the first version of the stairway) it stuck on the top step coming
+up. Client and server agreed on every block there; the bot's physics library has a rounding fault when pressed against a block
+face at coordinate -2 and walked itself into the block, which the server refused. That is the library, not the stairway, but
+jumping eight times up a corridor is clumsy for anyone, so the steps became half slabs and the fault no longer arises.
+
+**Not verified.** How any of it looks and feels in a real client, the tunnel and stairway included: they are checked by walking
+the real blocks from code and by a protocol bot, not by eye. More than one player. A live AscensionLib (its jar needs a local
 `webgui-dev.jar` and cannot be built here), so payouts are covered only by unit tests of the grouping and by log lines. The
 authored boss flow inside a dive. Whether a gatekeeper is beatable but hard at each stage: its numbers are guesses and need play.
 Performance with four players in the Depths at stage 5. The chest models in a client.
@@ -148,8 +189,8 @@ Performance with four players in the Depths at stage 5. The chest models in a cl
 
 1. **Nobody dies in a dive.** A lethal hit is a knock-out; a real death would drop the player's own gear.
 2. **What earns wins:** each Outbreak stage survived, each trial, each curse altar, the boss.
-3. **The Depths are a separate area reached by a stairway**, not an extension cut into each schematic: it needs no edits to
-   seventeen hand-built dungeons, and it makes the trek back to the portal part of the risk.
+3. **The Depths are joined to the dungeon by a real tunnel and stairway** (your call: "connect the maze physically"). The schematics
+   are not edited: the generator cuts the tunnel when it builds the run. How the place is chosen is described below.
 4. **The portal stays upstairs**, so leaving means climbing out through whatever the Outbreak has become.
 5. **The toll is counted in items by kind and seeded**, so it cannot be gamed by splitting stacks and never surprises.
 6. **Hidden loot is forfeit to the toll**, so tucking loot away never pays.
@@ -166,8 +207,8 @@ Performance with four players in the Depths at stage 5. The chest models in a cl
 
 1. **Play it**, alone and then in a party, with the real client and mod set.
 2. **Fire has no type dungeon.** Cinderforge was the fire dungeon and is outdated; a `fire` authored dungeon is needed to complete the set.
-3. **The Depths are a first version:** one storey, rooms on a regular grid, no hazards or mechanics of their own, no type-specific
-   set pieces. Good next steps: stairs and a second level, larger landmark rooms, per-type hazards from the authored DSL, secret rooms.
+3. **The Depths are a first version:** one storey, rooms on a regular grid, one way in, no hazards or mechanics of their own, no
+   type-specific set pieces. Good next steps: stairs and a second level, larger landmark rooms, per-type hazards from the authored DSL, secret rooms.
 4. **Is Lootr in the players' client pack?** It registers its own blocks.
 5. **Reconcile the `run` package**: it is a reconstruction; the dive leans on `RunManager.leave`, member presence and release order.
 6. **Run against AscensionLib** and read the `settleDungeonRun` statuses.

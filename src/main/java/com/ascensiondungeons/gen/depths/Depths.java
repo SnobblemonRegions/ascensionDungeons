@@ -75,6 +75,16 @@ public final class Depths {
 
     public boolean open(int x, int y, int z) { byte r = role(x, y, z); return r == AIR || r == LIGHT; }
 
+    private boolean door;
+
+    /** Whether the slab has a doorway in its near wall. */
+    public boolean hasDoor() { return door; }
+
+    /** The x of the middle of the doorway (and of the entrance room). */
+    public static int doorX(Params p) { return (p.gridW() / 2) * p.cell() + p.cell() / 2; }
+
+    private void setRaw(int x, int y, int z, byte role) { roles[(y * sizeZ + z) * sizeX + x] = role; }
+
     private void set(int x, int y, int z, byte role) {
         if (x < 1 || y < 0 || z < 1 || x >= sizeX - 1 || y >= HEIGHT || z >= sizeZ - 1) return;   // the outer shell stays wall
         roles[(y * sizeZ + z) * sizeX + x] = role;
@@ -87,7 +97,13 @@ public final class Depths {
 
     // ---- generation ----------------------------------------------------------------------------------------------
 
-    public static Depths generate(long seed, Params p) {
+    public static Depths generate(long seed, Params p) { return generate(seed, p, false); }
+
+    /**
+     * @param door when true the entrance room is opened to the slab's near edge (z = 0) with a passage three wide, so a tunnel
+     *             from outside can walk straight in. The opening is {@link #doorX} wide at {@code z = 0}, standing level {@link #STAND}.
+     */
+    public static Depths generate(long seed, Params p, boolean door) {
         Random rng = new Random(seed ^ 0x4445505448534CL);
         Depths d = new Depths(p);
         int w = p.gridW(), h = p.gridH();
@@ -146,6 +162,16 @@ public final class Depths {
         for (int c = 0; c < w * h; c++) if (used[c]) d.carveRoom(c % w, c / w, kinds[c], rng);
         int mid = p.cell() / 2;
         d.entrance = new int[] {start * p.cell() + mid, STAND, mid};
+        if (door) {
+            // The way in: from the entrance room's middle out through the slab's near wall.
+            int cx = start * p.cell() + mid;
+            for (int x = cx - 1; x <= cx + 1; x++)
+                for (int z = 0; z <= mid; z++) {
+                    d.setRaw(x, 1, z, FLOOR);
+                    for (int y = STAND; y < STAND + 4; y++) d.setRaw(x, y, z, AIR);
+                }
+            d.door = true;
+        }
         // 5. Prove it: every room must be reachable. A shape that walls itself off is replaced by an open hall.
         for (int attempt = 0; attempt < 3; attempt++) {
             boolean[] reach = d.flood();

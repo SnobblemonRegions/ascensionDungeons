@@ -162,6 +162,116 @@ public final class DiveE2E {
         return ItemStack.EMPTY;
     }
 
+    /** True when this world position is inside a room of the Depths. */
+    private static boolean deep(double x, double y, double z) {
+        AuthoredDirector.Session s = session();
+        int[] sc = s.generator().toSchematic(BlockPos.containing(x, y, z));
+        return com.ascensiondungeons.gen.authored.AuthoredLayout.inDepths(s.layout().roomAt(s.run().seed(), sc[0], sc[1], sc[2]));
+    }
+
+    /** Where the maze's first room is, in the world. */
+    private static BlockPos depthsEntrance() {
+        AuthoredDirector.Session s = session();
+        int[] e = s.layout().depths(s.run().seed()).entrance();
+        return s.generator().toWorld(s.layout().link().toSchem(e[0], e[1], e[2]));
+    }
+
+    /** Whether a player's body fits in this block of the real world: nothing to collide with and no fluid. */
+    private static boolean clear(ServerLevel level, BlockPos p) {
+        var state = level.getBlockState(p);
+        return state.getCollisionShape(level, p).isEmpty() && state.getFluidState().isEmpty();
+    }
+
+    /** A half step: a block no taller than a slab, which a player walks onto without jumping. */
+    private static boolean halfStep(ServerLevel level, BlockPos p) {
+        var state = level.getBlockState(p);
+        var shape = state.getCollisionShape(level, p);
+        return !shape.isEmpty() && shape.max(Direction.Axis.Y) <= 0.5 && state.getFluidState().isEmpty();
+    }
+
+    /** A block a player can stand in: open with ground under it, or a half step with room above for the half block it raises them. */
+    private static boolean standable(ServerLevel level, BlockPos p) {
+        if (halfStep(level, p)) return clear(level, p.above()) && clear(level, p.above(2));
+        // Ground is a block taller than a half step: over a slab the player is really standing in the slab's own cell.
+        return clear(level, p) && clear(level, p.above()) && !level.getBlockState(p.below()).getCollisionShape(level, p.below()).isEmpty() && !halfStep(level, p.below());
+    }
+
+    /**
+     * The shortest walk between two standing blocks through the blocks that are really in the world, or null. The walker is
+     * two blocks tall, moves on the four compass points, climbs one block where there is headroom to jump and drops up to three.
+     */
+    private static List<BlockPos> path(ServerLevel level, BlockPos from, BlockPos to) {
+        if (!standable(level, from) || !standable(level, to)) return null;
+        java.util.Map<BlockPos, BlockPos> parent = new java.util.HashMap<>();
+        java.util.ArrayDeque<BlockPos> queue = new java.util.ArrayDeque<>();
+        parent.put(from, from);
+        queue.add(from);
+        Direction[] sides = {Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST};
+        while (!queue.isEmpty() && parent.size() < 600_000) {
+            BlockPos at = queue.poll();
+            if (at.equals(to)) {
+                List<BlockPos> out = new ArrayList<>();
+                for (BlockPos p = at; !p.equals(from); p = parent.get(p)) out.add(p);
+                out.add(from);
+                java.util.Collections.reverse(out);
+                return out;
+            }
+            for (Direction side : sides) {
+                for (int dy = 1; dy >= -3; dy--) {
+                    BlockPos next = at.relative(side).above(dy);
+                    if (!standable(level, next)) continue;
+                    if (dy == 1 && !clear(level, at.above(2))) continue;
+                    boolean open = true;
+                    for (int y = next.getY() + 2; y <= at.getY() + 1 && open; y++) open = clear(level, new BlockPos(next.getX(), y, next.getZ()));
+                    if (!open) continue;
+                    if (parent.putIfAbsent(next, at) == null) queue.add(next);
+                    break;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Moves the stand-in player along a real walk, a few blocks a tick, then waits for {@code arrived}. Nothing teleports them past a wall. */
+    private static final class Walk implements BooleanSupplier {
+        final String label;
+        final Supplier<BlockPos> target;
+        final BooleanSupplier arrived;
+        List<BlockPos> path;
+        int at;
+        Walk(String label, Supplier<BlockPos> target, BooleanSupplier arrived) { this.label = label; this.target = target; this.arrived = arrived; }
+        @Override public boolean getAsBoolean() {
+            ServerLevel level = (ServerLevel) bot.level();
+            bot.setInvulnerable(true);
+            if (path == null) {
+                BlockPos from = bot.blockPosition(), to = target.get();
+                for (int i = 0; i < 3 && !standable(level, from); i++) from = from.below();
+                path = path(level, from, to);
+                if (path == null) throw new IllegalStateException("no walkable way from " + from.toShortString() + " to " + to.toShortString());
+                Vec3 mouth = dive().tunnelMouth();
+                double nearest = Double.MAX_VALUE;
+                for (BlockPos p : path) nearest = Math.min(nearest, Math.sqrt(p.distToCenterSqr(mouth.x, mouth.y, mouth.z)));
+                int halfSteps = 0;
+                for (BlockPos p : path) if (halfStep(level, p)) halfSteps++;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E walk {}: {} blocks from {} to {}, {} levels {} over {} half steps ({}), passing {} from the tunnel mouth at {}", label, path.size() - 1,
+                        from.toShortString(), to.toShortString(), Math.abs(from.getY() - to.getY()), to.getY() < from.getY() ? "down" : "up", halfSteps,
+                        halfSteps == 0 ? "none" : net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(level.getBlockState(path.stream().filter(p -> halfStep(level, p)).findFirst().get()).getBlock()),
+                        String.format("%.1f", nearest), BlockPos.containing(mouth).toShortString());
+                // Every block the stairway descends is taken in two half steps, so nobody has to jump.
+                if (halfSteps < com.ascensiondungeons.gen.depths.DepthsLink.DROP) throw new IllegalStateException("the stairway has only " + halfSteps + " half steps");
+                // Where the room's wall slopes, the walker may step into the tunnel a few blocks along it rather than at its very mouth.
+                if (nearest > com.ascensiondungeons.gen.depths.DepthsLink.OPENING + 1) throw new IllegalStateException("the walk does not go through the tunnel");
+            }
+            if (at < path.size()) {
+                at = Math.min(path.size(), at + 3);
+                BlockPos p = path.get(at - 1);
+                bot.teleportTo(level, p.getX() + 0.5, p.getY(), p.getZ() + 0.5, bot.getYRot(), 0f);
+                return false;
+            }
+            return arrived.getAsBoolean();
+        }
+    }
+
     private static void script(MinecraftServer server, Supplier<RunManager> manager) {
         boolean cobblemon = FabricLoader.getInstance().isModLoaded("cobblemon");
         join(server);
@@ -179,14 +289,12 @@ public final class DiveE2E {
             if (bot.getHealth() < bot.getMaxHealth()) { AscensionDungeonsLog.LOG.info("DIVE-E2E player health {} of {}", bot.getHealth(), bot.getMaxHealth()); return true; }
             return false;
         }));
-        steps.add(new Step("the stairway by the entrance carries the player down into the generated Depths", 200, new BooleanSupplier() {
-            boolean moved, logged;
+        steps.add(new Step("the player walks out of the entrance room through the tunnel, down the stairway and into the generated Depths", 600, new Walk("down",
+                DiveE2E::depthsEntrance, new BooleanSupplier() {
+            boolean logged;
             @Override public boolean getAsBoolean() {
                 OutbreakDive d = dive();
-                bot.setInvulnerable(true);
-                if (d.descentCentre() == null) throw new IllegalStateException("this dive has no stairway");
-                if (!moved) { Vec3 p = d.descentCentre(); bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f); moved = true; return false; }
-                if (bot.position().distanceToSqr(d.returnCentre()) > 4) return false;
+                if (d.descentCentre() != null) throw new IllegalStateException("this dive still has a teleporting stairway");
                 ServerLevel level = (ServerLevel) bot.level();
                 BlockPos feet = bot.blockPosition();
                 AuthoredDirector.Session s = session();
@@ -203,16 +311,17 @@ public final class DiveE2E {
                 if (!logged) AscensionDungeonsLog.LOG.info("DIVE-E2E in the Depths: room {} of {} rooms, standing on {}, blocks nearby {}, palette {}", room == null ? null : room.id,
                         s.layout().rooms(s.run().seed()).length, level.getBlockState(feet.below()).getBlock(), seen, java.util.Arrays.toString(palette));
                 logged = true;
-                boolean built = seen.contains(palette[0]) && seen.contains(palette[1]) && seen.contains("minecraft:light") && seen.contains("minecraft:chiseled_deepslate");
-                return room != null && com.ascensiondungeons.gen.authored.AuthoredLayout.inDepths(room) && built;
+                boolean built = seen.contains(palette[0]) && seen.contains(palette[1]) && seen.contains("minecraft:light");
+                // The dive itself noticed the player walk in (nothing carried them).
+                return room != null && com.ascensiondungeons.gen.authored.AuthoredLayout.inDepths(room) && built && d.inDepths(ID);
             }
-        }));
+        })));
         steps.add(new Step("a chest down in the Depths gives marked loot", 200, new BooleanSupplier() {
             boolean used;
             @Override public boolean getAsBoolean() {
-                double edge = dive().returnCentre().z - 14;
+                bot.setInvulnerable(true);
                 if (!used) {
-                    for (int[] c : features("CHEST")) if (c[2] > edge && opened.add(c[0] + "," + c[1] + "," + c[2])) { use(c); used = true; AscensionDungeonsLog.LOG.info("DIVE-E2E opening the Depths chest at {} {} {}", c[0], c[1], c[2]); return false; }
+                    for (int[] c : features("CHEST")) if (deep(c[0], c[1], c[2]) && opened.add(c[0] + "," + c[1] + "," + c[2])) { use(c); used = true; AscensionDungeonsLog.LOG.info("DIVE-E2E opening the Depths chest at {} {} {}", c[0], c[1], c[2]); return false; }
                     throw new IllegalStateException("no chest in the Depths");
                 }
                 if (!takeAll()) return false;
@@ -222,23 +331,53 @@ public final class DiveE2E {
             }
         }));
         steps.add(new Step("a wave follows the party into the Depths", 1200, () -> {
-            double edge = dive().returnCentre().z - 14;
-            for (Mob m : dive().enemyMobs()) if (m.getZ() > edge) { AscensionDungeonsLog.LOG.info("DIVE-E2E enemy {} in the Depths at {}", m.getName().getString(), m.blockPosition().toShortString()); return true; }
+            for (Mob m : dive().enemyMobs()) if (deep(m.getX(), m.getY(), m.getZ())) { AscensionDungeonsLog.LOG.info("DIVE-E2E enemy {} in the Depths at {}", m.getName().getString(), m.blockPosition().toShortString()); return true; }
             return false;
         }));
-        steps.add(new Step("the way back up returns the player to the entrance room", 200, new BooleanSupplier() {
-            boolean moved;
+        steps.add(new Step("the player walks back up the stairway to the entrance room", 900, new Walk("up", () -> BlockPos.containing(dive().tunnelMouth()), () -> {
+            AuthoredDirector.Session s = session();
+            int[] sc = s.generator().toSchematic(bot.blockPosition());
+            var room = s.layout().roomAt(s.run().seed(), sc[0], sc[1], sc[2]);
+            return room != null && room == s.layout().entryRoom() && !dive().inDepths(ID);
+        })));
+        steps.add(new Step("an enemy that spawned up in the dungeon chases the player down the stairway", 4800, new BooleanSupplier() {
+            int t = -1;
+            final java.util.Set<UUID> fromAbove = new java.util.HashSet<>();
             @Override public boolean getAsBoolean() {
-                OutbreakDive d = dive();
-                if (!moved) {
-                    // Only a player who has stepped off the arrival spot is carried when they step back on it.
-                    if (bot.position().distanceToSqr(d.returnCentre()) < 9) return false;
-                    Vec3 p = d.returnCentre();
-                    bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f);
-                    moved = true;
+                AuthoredDirector.Session s = session();
+                var link = s.layout().link();
+                ServerLevel level = (ServerLevel) bot.level();
+                final int foot = 22;                                       // the foot of the stairway, eight blocks below the dungeon's floor
+                BlockPos top = s.generator().toWorld(link.stair(-1));
+                bot.setInvulnerable(false);
+                bot.setHealth(bot.getMaxHealth());
+                if (t < 0) {
+                    for (Mob m : dive().enemyMobs()) m.discard();          // nothing left over from the Depths
+                    // Stand at the head of the stairway: the entrance room is the nearest room, so that is where the next wave spawns.
+                    t = 1;
+                    BlockPos head = s.generator().toWorld(link.stair(t));
+                    bot.teleportTo(level, head.getX() + 0.5, head.getY(), head.getZ() + 0.5, 0f, 0f);
                     return false;
                 }
-                return bot.position().distanceToSqr(d.descentCentre()) < 4;
+                Mob nearest = null;
+                for (Mob m : dive().enemyMobs()) {
+                    if (m.getY() >= top.getY() - 0.5 && fromAbove.add(m.getUUID()))
+                        AscensionDungeonsLog.LOG.info("DIVE-E2E {} is up on the dungeon floor at {}", m.getName().getString(), m.blockPosition().toShortString());
+                    if (fromAbove.contains(m.getUUID()) && (nearest == null || m.distanceToSqr(bot) < nearest.distanceToSqr(bot))) nearest = m;
+                }
+                if (nearest == null) return false;
+                // Flee like a player would: an enemy sees about 26 blocks, so stay just ahead of it, one step at a time.
+                if (t < foot) {
+                    if (nearest.distanceToSqr(bot) < 10 * 10) {
+                        BlockPos next = s.generator().toWorld(link.stair(++t));
+                        bot.teleportTo(level, next.getX() + 0.5, next.getY(), next.getZ() + 0.5, 0f, 0f);
+                    }
+                    return false;
+                }
+                if (nearest.getY() > top.getY() - 5 || nearest.distanceToSqr(bot) > 6 * 6) return false;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E {} ({}) came down the stairway from the dungeon floor (y {}) to {} beside the player at {}", nearest.getName().getString(),
+                        nearest.getClass().getSimpleName(), top.getY(), nearest.blockPosition().toShortString(), bot.blockPosition().toShortString());
+                return true;
             }
         }));
         steps.add(new Step("a rarity chest opens and its loot is marked", 100, new BooleanSupplier() {
@@ -437,34 +576,28 @@ public final class DiveE2E {
                 AscensionDungeonsLog.LOG.info("DIVE-E2E {} enemies: {}", type, names);
                 return !cobblemon || allPokemon;
             }));
-            steps.add(new Step(type + ": the stairway leads down into Depths built from its own blocks", 200, new BooleanSupplier() {
-                boolean moved;
-                @Override public boolean getAsBoolean() {
-                    OutbreakDive d = dive();
-                    if (d.descentCentre() == null) throw new IllegalStateException("no stairway");
-                    if (!moved) { Vec3 p = d.descentCentre(); bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f); moved = true; return false; }
-                    if (bot.position().distanceToSqr(d.returnCentre()) > 4) return false;
-                    ServerLevel level = (ServerLevel) bot.level();
-                    AuthoredDirector.Session s = session();
-                    int[] sc = s.generator().toSchematic(bot.blockPosition());
-                    var room = s.layout().roomAt(s.run().seed(), sc[0], sc[1], sc[2]);
-                    String[] palette = s.layout().depthsPalette();
-                    java.util.Set<String> seen = new java.util.TreeSet<>();
-                    for (int dx = -12; dx <= 12; dx++) for (int dz = -12; dz <= 12; dz++) for (int dy = -1; dy <= 9; dy++) {
-                        var state = level.getBlockState(bot.blockPosition().offset(dx, dy, dz));
-                        if (!state.isAir() || state.is(net.minecraft.world.level.block.Blocks.LIGHT)) seen.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
-                    }
-                    AscensionDungeonsLog.LOG.info("DIVE-E2E {} Depths: room {} of {}, palette {}", type, room == null ? null : room.id, s.layout().rooms(s.run().seed()).length, java.util.Arrays.toString(palette));
-                    return room != null && com.ascensiondungeons.gen.authored.AuthoredLayout.inDepths(room) && seen.contains(palette[0]) && seen.contains(palette[1]) && seen.contains("minecraft:light");
+            steps.add(new Step(type + ": the tunnel and stairway walk down into Depths built from its own blocks", 600, new Walk(type + " down", DiveE2E::depthsEntrance, () -> {
+                OutbreakDive d = dive();
+                if (d.descentCentre() != null) throw new IllegalStateException("still a teleporting stairway");
+                ServerLevel level = (ServerLevel) bot.level();
+                AuthoredDirector.Session s = session();
+                int[] sc = s.generator().toSchematic(bot.blockPosition());
+                var room = s.layout().roomAt(s.run().seed(), sc[0], sc[1], sc[2]);
+                String[] palette = s.layout().depthsPalette();
+                java.util.Set<String> seen = new java.util.TreeSet<>();
+                for (int dx = -12; dx <= 12; dx++) for (int dz = -12; dz <= 12; dz++) for (int dy = -1; dy <= 9; dy++) {
+                    var state = level.getBlockState(bot.blockPosition().offset(dx, dy, dz));
+                    if (!state.isAir() || state.is(net.minecraft.world.level.block.Blocks.LIGHT)) seen.add(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
                 }
-            }));
+                return room != null && com.ascensiondungeons.gen.authored.AuthoredLayout.inDepths(room) && seen.contains(palette[0]) && seen.contains(palette[1])
+                        && seen.contains("minecraft:light") && d.inDepths(ID);
+            })));
             steps.add(new Step(type + ": a chest in the Depths gives marked loot", 200, new BooleanSupplier() {
                 boolean used;
                 @Override public boolean getAsBoolean() {
-                    double edge = dive().returnCentre().z - 14;
                     if (!used) {
                         for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
-                        for (int[] c : features("CHEST")) if (c[2] > edge && opened.add(c[0] + "," + c[1] + "," + c[2])) { use(c); used = true; return false; }
+                        for (int[] c : features("CHEST")) if (deep(c[0], c[1], c[2]) && opened.add(c[0] + "," + c[1] + "," + c[2])) { use(c); used = true; return false; }
                         throw new IllegalStateException("no chest in the Depths");
                     }
                     if (!takeAll()) return false;
@@ -473,6 +606,12 @@ public final class DiveE2E {
                     return c[0] > 0 && c[0] == c[1];
                 }
             }));
+            steps.add(new Step(type + ": the stairway walks back up to the entrance room", 900, new Walk(type + " up", () -> BlockPos.containing(dive().tunnelMouth()), () -> {
+                AuthoredDirector.Session s = session();
+                int[] sc = s.generator().toSchematic(bot.blockPosition());
+                var room = s.layout().roomAt(s.run().seed(), sc[0], sc[1], sc[2]);
+                return room != null && room == s.layout().entryRoom() && !dive().inDepths(ID);
+            })));
             steps.add(new Step(type + ": the portal shows the toll, and paying it lets the player out", 300, new BooleanSupplier() {
                 boolean moved, paid;
                 int before, shownNow;
