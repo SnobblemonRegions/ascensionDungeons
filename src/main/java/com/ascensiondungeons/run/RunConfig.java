@@ -57,6 +57,10 @@ public final class RunConfig {
     public boolean authoredPokemon = true;
     public boolean authoredRaids = true;
     public boolean authoredCombat = false;
+    /** Whether any player may open the dungeon picker with /dive. Off, the command needs operator rights (for servers that open it from an NPC). */
+    public boolean playerDives = true;
+    /** How long a party invitation stands. */
+    public int partyInviteSeconds = 60;
     public boolean authoredRealtimeBoss = false;
     public int combatFaintSeconds = 10;
     public double combatDamageMultiplier = 1.0;

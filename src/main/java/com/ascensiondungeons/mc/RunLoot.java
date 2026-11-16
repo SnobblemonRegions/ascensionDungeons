@@ -116,6 +116,36 @@ public final class RunLoot {
         return n[0];
     }
 
+    /**
+     * How many items of this run's loot the player carries, wherever they are: the inventory, inside bundles and boxes, the
+     * ender chest, the cursor and party Pokémon. Counts items, not stacks.
+     */
+    public static int countItems(ServerPlayer player, UUID run) {
+        Predicate<ItemStack> marked = s -> run.equals(runOf(s));
+        int[] n = {0};
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) n[0] += items(player.getInventory().getItem(i), marked);
+        Container ender = player.getEnderChestInventory();
+        for (int i = 0; i < ender.getContainerSize(); i++) n[0] += items(ender.getItem(i), marked);
+        n[0] += items(player.containerMenu.getCarried(), marked);
+        PartyItems party = partyItems;
+        if (party != null) {
+            try { party.each(player, held -> { n[0] += items(held, marked); return held; }); }
+            catch (RuntimeException | LinkageError e) { com.ascensiondungeons.AscensionDungeonsLog.LOG.warn("[run-loot] could not count party held items", e); }
+        }
+        return n[0];
+    }
+
+    /** The marked items in a stack: the stack itself if it is marked, and anything marked inside it. */
+    private static int items(ItemStack s, Predicate<ItemStack> marked) {
+        if (s.isEmpty()) return 0;
+        int n = marked.test(s) ? s.getCount() : 0;
+        BundleContents bundle = s.get(DataComponents.BUNDLE_CONTENTS);
+        if (bundle != null) for (ItemStack inner : bundle.items()) n += items(inner, marked);
+        ItemContainerContents box = s.get(DataComponents.CONTAINER);
+        if (box != null) for (ItemStack inner : box.nonEmptyItems()) n += items(inner, marked);
+        return n;
+    }
+
     private static int countNested(ItemStack holder, Predicate<ItemStack> marked) {
         if (holder.isEmpty()) return 0;
         int n = 0;

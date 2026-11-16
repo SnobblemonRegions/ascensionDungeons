@@ -123,6 +123,31 @@ public final class AuthoredLayout {
     /** This dungeon's Outbreak dive settings ({@code outbreak.json} beside the layout), or null when it is an ordinary dungeon. */
     public JsonObject outbreak() { return outbreak; }
 
+    /**
+     * What this dungeon asks of a party, for the picker and the check at the door: its tier, the levels of its ordinary
+     * enemies (the {@code wild_low} and {@code wild_mid} pools), its gatekeepers' level (the {@code boss} pool) and its length.
+     */
+    public com.ascensiondungeons.outbreak.Readiness.Card card() {
+        JsonObject pools = Jx.o(data.pokemon, "pools");
+        int min = level(pools, "wild_low", "min", true), max = level(pools, "wild_mid", "max", false), keeper = level(pools, "boss", "min", true);
+        if (max < min) max = Math.max(min, level(pools, "wild_low", "max", false));
+        return new com.ascensiondungeons.outbreak.Readiness.Card(data.id, data.name == null ? data.id : data.name, Math.max(1, Jx.i(data.pokemon, "tier", 1)), min, max, keeper,
+                outbreak == null ? 0 : Jx.i(outbreak, "durationMinutes", 45));
+    }
+
+    /** The lowest (or highest) value of a key over a pool's entries; 0 when the pool is missing or empty. */
+    private static int level(JsonObject pools, String pool, String key, boolean lowest) {
+        int found = 0;
+        boolean any = false;
+        for (JsonElement e : Jx.a(pools, pool)) {
+            if (!e.isJsonObject() || !e.getAsJsonObject().has(key)) continue;
+            int v = e.getAsJsonObject().get(key).getAsInt();
+            found = !any ? v : lowest ? Math.min(found, v) : Math.max(found, v);
+            any = true;
+        }
+        return found;
+    }
+
     // ---- the Depths (procedural, per run) ------------------------------------------------------------------------
 
     private com.ascensiondungeons.gen.depths.DepthsLink link;

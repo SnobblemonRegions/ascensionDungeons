@@ -65,7 +65,7 @@ public final class AuthoredEvents {
             if (d == null || !(entity instanceof ServerPlayer sp)) return true;
             try {
                 AuthoredDirector.Session s = d.sessionFor(sp.level());
-                return s == null || s.dive() == null || s.dive().knockedOut(sp);
+                return s == null || s.dive() == null || s.dive().knockedOut(sp, source);
             } catch (RuntimeException e) {
                 com.ascensiondungeons.AscensionDungeonsLog.LOG.error("Knock-out handling failed; letting the death through", e);
                 return true;

@@ -49,6 +49,11 @@ public final class DiveE2E {
     private static final UUID ID = UUID.nameUUIDFromBytes("OfflinePlayer:DiveBot".getBytes(StandardCharsets.UTF_8));
     private static ServerPlayer bot;
     private static EmbeddedChannel channel;
+    /** A second stand-in player, for the party steps. */
+    private static final UUID ID2 = UUID.nameUUIDFromBytes("OfflinePlayer:DiveBot2".getBytes(StandardCharsets.UTF_8));
+    private static ServerPlayer bot2;
+    private static EmbeddedChannel channel2;
+    private static final List<String> chat2 = new ArrayList<>();
     private static final List<Step> steps = new ArrayList<>();
     private static int index, passed, failed;
     private static long stepStart = -1;
@@ -70,6 +75,14 @@ public final class DiveE2E {
                     // A real client confirms each dimension change; until then the server holds the player invulnerable.
                     if (bot.isChangingDimension()) bot.hasChangedDimension();
                     bot.doTick();
+                }
+                if (channel2 != null) for (Object out; (out = channel2.readOutbound()) != null; ) {
+                    if (out instanceof net.minecraft.network.protocol.game.ClientboundSystemChatPacket c && !c.overlay()) chat2.add(c.content().getString());
+                    io.netty.util.ReferenceCountUtil.release(out);
+                }
+                if (bot2 != null && !bot2.isRemoved() && bot2.connection != null) {
+                    if (bot2.isChangingDimension()) bot2.hasChangedDimension();
+                    bot2.doTick();
                 }
                 if (index >= steps.size()) return;
                 Step s = steps.get(index);
@@ -97,6 +110,18 @@ public final class DiveE2E {
     }
 
     private static boolean heard(String text) { for (String line : chat) if (line.contains(text)) return true; return false; }
+
+    /** The number that follows {@code prefix} in the last chat line that has it (the recap's "Kept: 12 items"); -1 if none. */
+    private static int recapNumber(String prefix) {
+        int found = -1;
+        for (String line : chat) {
+            int at = line.indexOf(prefix);
+            if (at < 0) continue;
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\d+").matcher(line.substring(at + prefix.length()));
+            if (m.find()) found = Integer.parseInt(m.group());
+        }
+        return found;
+    }
 
     private static com.ascensiondungeons.outbreak.Onboarding.Progress progress() {
         return com.ascensiondungeons.mc.OnboardingStore.of(bot.server).progress(ID);
@@ -291,7 +316,58 @@ public final class DiveE2E {
     private static void script(MinecraftServer server, Supplier<RunManager> manager) {
         boolean cobblemon = FabricLoader.getInstance().isModLoaded("cobblemon");
         join(server);
-        addRun(manager, "run 1");
+        steps.add(new Step("/dive opens the picker: every type dungeon, gentlest first, the gentlest recommended, and what this player is not ready for", 40, new BooleanSupplier() {
+            boolean sent;
+            @Override public boolean getAsBoolean() {
+                if (!sent) { opened.clear(); command("dive"); sent = true; return false; }
+                if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu menu)) return false;
+                int offered = 0;
+                List<String> names = new ArrayList<>();
+                for (int i = 0; i < 18; i++) { ItemStack it = menu.getSlot(i).getItem(); if (!it.isEmpty()) { offered++; names.add(it.getHoverName().getString()); } }
+                List<String> first = lore(menu.getSlot(0).getItem());
+                int water = slotOf(menu, "The Drowned Reservoir"), dragon = slotOf(menu, "The Elder Wyrm Roost");
+                List<String> waterLore = lore(menu.getSlot(water).getItem());
+                AscensionDungeonsLog.LOG.info("DIVE-E2E picker: {} dungeons {}; first: {}; water (slot {}): {}", offered, names, first, water, waterLore);
+                String all = String.join(" ", waterLore);
+                // 17 dungeons; Normal first and recommended; Dragon (tier 4) last; Water warns about the tier and, with Cobblemon, the missing team.
+                return offered == 17 && names.get(0).equals("The Hearthwarden Village") && first.contains("Recommended for your first dive") && first.contains("Normal type, tier 1")
+                        && dragon == 16 && waterLore.contains("Water type, tier 3") && waterLore.contains("Enemies: level 12 to 30") && all.contains("This is a tier 3 dungeon.")
+                        && (!cobblemon || all.contains("You have no Pokémon with you.")) && (!cobblemon || String.join(" ", first).contains("You have no Pokémon with you."))
+                        && menu.getSlot(com.ascensiondungeons.mc.DiveMenu.PARTY).getItem().getHoverName().getString().equals("Diving alone");
+            }
+        }));
+        steps.add(new Step("picking a harder dungeon for a first dive warns once, takes nothing, and goes in on the second click", 60, new BooleanSupplier() {
+            int phase;
+            int before;
+            @Override public boolean getAsBoolean() {
+                if (phase == 0) {
+                    if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu menu)) return false;
+                    before = totalItems();
+                    menu.clicked(slotOf(menu, "The Drowned Reservoir"), 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                    phase = 1;
+                    return false;
+                }
+                if (phase == 1) {
+                    if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu menu)) return false;
+                    boolean warned = heard("The Drowned Reservoir: before you go in") && heard("For a first dive, The Hearthwarden Village (tier 1) is the one to start with.")
+                            && heard("Click it again to dive anyway.") && manager.get().runOf(ID).isEmpty() && totalItems() == before && menu.getCarried().isEmpty();
+                    if (!warned) throw new IllegalStateException("the first click should only warn");
+                    if (!lore(menu.getSlot(slotOf(menu, "The Drowned Reservoir")).getItem()).contains("Click again to dive anyway.")) throw new IllegalStateException("the item should say to click again");
+                    menu.clicked(slotOf(menu, "The Drowned Reservoir"), 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                    phase = 2;
+                    return false;
+                }
+                return manager.get().runOf(ID).map(r -> "water".equals(r.dungeonType())).orElse(false) && heard("Entering The Drowned Reservoir (Water, tier 3).")
+                        && !(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu);
+            }
+        }));
+        inside(manager, "run 1");
+        steps.add(new Step("the portal's bar points this player's own way out, and says their first extraction is free", 100, () -> {
+            String text = dive().portalText(ID);
+            if (text == null) return false;
+            AscensionDungeonsLog.LOG.info("DIVE-E2E portal bar: \"{}\"", text);
+            return text.matches("Extraction portal ([\u2190-\u2199] \\d+m(, (above|below) you)?|right here): your first extraction is free");
+        }));
         steps.add(new Step("a first-time player is welcomed by the tutorial instead of the briefing, with a Guide bar pointing at a chest", 200, new BooleanSupplier() {
             boolean logged;
             @Override public boolean getAsBoolean() {
@@ -371,7 +447,9 @@ public final class DiveE2E {
             List<String> told = d.lessonsTold(ID);
             if (!told.contains("DEPTHS") || !told.contains("UNBANKED")) return false;
             AscensionDungeonsLog.LOG.info("DIVE-E2E tutorial in the Depths: told {}, guide bar \"{}\"", told, d.guideText(ID));
-            return "EXTRACT".equals(d.guideGoal(ID)) && d.guideText(ID).startsWith("Guide: Get back to the extraction portal and leave") && heard("Guide: Your loot is at risk");
+            AscensionDungeonsLog.LOG.info("DIVE-E2E portal bar in the Depths: \"{}\"", d.portalText(ID));
+            return "EXTRACT".equals(d.guideGoal(ID)) && d.guideText(ID).startsWith("Guide: Get back to the extraction portal and leave") && heard("Guide: Your loot is at risk")
+                    && d.portalText(ID).matches("Extraction portal [\u2190-\u2199] \\d+m.*: your first extraction is free");
         }));
         steps.add(new Step("a wave follows the party into the Depths", 1200, () -> {
             for (Mob m : dive().enemyMobs()) if (deep(m.getX(), m.getY(), m.getZ())) { AscensionDungeonsLog.LOG.info("DIVE-E2E enemy {} in the Depths at {}", m.getName().getString(), m.blockPosition().toShortString()); return true; }
@@ -476,12 +554,40 @@ public final class DiveE2E {
             }
         }));
         steps.add(new Step("the knocked-out player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
+        steps.add(new Step("the knock-out ends with a recap: how it ended, the stage, what was kept and lost, and a tip", 40, () -> {
+            List<String> recap = new ArrayList<>();
+            boolean in = false;
+            for (String line : chat) { if (line.startsWith("Dive recap:")) in = true; if (in && recap.size() < 5) recap.add(line.trim()); }
+            AscensionDungeonsLog.LOG.info("DIVE-E2E recap after the knock-out: {}", recap);
+            return recap.size() == 5 && recap.get(0).equals("Dive recap: The Drowned Reservoir") && recap.get(1).startsWith("You were knocked out") && recap.get(2).matches("Outbreak: stage \\d \\(.+\\) after \\d+m \\d\\ds\\. Chests opened: \\d+\\.")
+                    && recap.get(3).matches("Kept: \\d+ items?, \\d+ wins?\\. Lost: \\d+ items?, \\d+ wins?\\.") && !recap.get(3).contains("Lost: 0 items") && recap.get(4).startsWith("Tip: ");
+        }));
         steps.add(new Step("the knock-out is explained on screen and in chat, and the player is still being taught", 40, () -> {
             AscensionDungeonsLog.LOG.info("DIVE-E2E after the knock-out: titles {}, knock-outs {}, graduated {}", titles, progress().knockOuts(), progress().graduated());
             boolean ok = heard("Guide: Knocked out") && heard("everything you brought with you, is safe") && titles.contains("Knocked out") && progress().knockOuts() == 1 && progress().rookie();
             chat.clear();
             titles.clear();
             return ok;
+        }));
+        steps.add(new Step("back at the picker, the check at the door now names the weak team" + (cobblemon ? "" : " (skipped without Cobblemon: only the tier is named)"), 40, new BooleanSupplier() {
+            boolean sent;
+            @Override public boolean getAsBoolean() {
+                if (!sent) { command("dive"); sent = true; return false; }
+                if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu menu)) return false;
+                String normal = String.join(" ", lore(menu.getSlot(0).getItem()));
+                AscensionDungeonsLog.LOG.info("DIVE-E2E picker after run 1: {}", normal);
+                bot.closeContainer();
+                // The stand-in player now has two level 5 Pokémon; the gentlest dungeon's enemies start at 12.
+                return cobblemon ? normal.contains("Your strongest Pokémon is level 5. Enemies here start at level 12 and reach 30.") && !normal.contains("You look ready.")
+                        : normal.contains("You look ready.");
+            }
+        }));
+        steps.add(new Step("the party commands answer: alone, and nobody invites themselves", 20, () -> {
+            command("dive party");
+            command("dive invite DiveBot");
+            command("dive accept");
+            return heard("You are diving alone.") && heard("You are already in your own party.") && heard("You have no invitation to accept")
+                    && com.ascensiondungeons.mc.DiveEntry.current.party(ID).equals(Set.of(ID));
         }));
         steps.add(new Step("the dive guide opens as a window with a page for every lesson, and nothing can be taken from it", 40, new BooleanSupplier() {
             boolean opened;
@@ -522,6 +628,12 @@ public final class DiveE2E {
             return !d.lessonsTold(ID).contains("WELCOME") && !heard("Guide: Welcome") && "LOOT".equals(d.guideGoal(ID)) && progress().dives() == 2;
         }));
         portalRun(server, manager, cobblemon, "run 2", true);
+        steps.add(new Step("the recap of the free extraction says nothing was lost", 40, () -> {
+            AscensionDungeonsLog.LOG.info("DIVE-E2E recap after the free extraction: {}", chat.stream().filter(l -> l.startsWith("Dive recap") || l.startsWith("  ")).toList());
+            // Everything carried was kept: what was in the inventory and, with Cobblemon, the item hidden on a Pokémon.
+            return heard("Dive recap: The Drowned Reservoir") && heard("You extracted free: your first extraction cost nothing.") && recapNumber("Kept: ") >= itemsBefore
+                    && heard("Lost: 0 items, 0 wins.") && heard("Tip: From now on leaving costs 35% of your unbanked loot");
+        }));
         steps.add(new Step("the free first extraction is explained, finishes the tutorial and is used up", 40, () -> {
             AscensionDungeonsLog.LOG.info("DIVE-E2E after the free extraction: titles {}, extractions {}, graduated {}, still free {}", titles, progress().extractions(),
                     progress().graduated(), progress().firstExtractionFree());
@@ -549,6 +661,12 @@ public final class DiveE2E {
             return "LOOT".equals(d.guideGoal(ID)) && !d.firstExtractionFree(bot) && heard("Guide: Welcome to your first dive");
         }));
         portalRun(server, manager, cobblemon, "run 3", false);
+        steps.add(new Step("the recap of the toll counts exactly what it took", 40, () -> {
+            AscensionDungeonsLog.LOG.info("DIVE-E2E recap after the toll: {}", chat.stream().filter(l -> l.startsWith("Dive recap") || l.startsWith("  ")).toList());
+            // The toll took the shown items, and with Cobblemon the one hidden on a Pokémon as well.
+            int lost = recapNumber("Lost: ");
+            return heard("You extracted by paying the toll.") && recapNumber("Kept: ") == itemsBefore - shown && (cobblemon ? lost > shown : lost == shown) && heard("Tip: ");
+        }));
         steps.add(new Step("paying the toll is explained, and graduates the player", 40, () -> {
             boolean ok = heard("Guide: Extracted") && heard("You paid the toll and kept the rest") && progress().graduated();
             chat.clear();
@@ -609,6 +727,106 @@ public final class DiveE2E {
             }
         }));
         steps.add(new Step("the extracted player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
+        steps.add(new Step("the recap after beating the gatekeeper says everything was kept", 40, () ->
+                heard("You extracted past the gatekeeper and kept everything.") && heard("Lost: 0 items, 0 wins.") && heard("Tip: ")));
+        partySteps(server, manager, cobblemon);
+    }
+
+    private static boolean heard2(String text) { for (String line : chat2) if (line.contains(text)) return true; return false; }
+
+    /** Two players: an invitation, an acceptance, one dive together, and each told only what is theirs to hear. */
+    private static void partySteps(MinecraftServer server, Supplier<RunManager> manager, boolean cobblemon) {
+        steps.add(new Step("a second player joins the server", 100, () -> {
+            if (bot2 == null) {
+                GameProfile profile = new GameProfile(ID2, "DiveBot2");
+                bot2 = new ServerPlayer(server, server.overworld(), profile, ClientInformation.createDefault());
+                Connection connection = new Connection(PacketFlow.SERVERBOUND);
+                channel2 = new EmbeddedChannel(connection);
+                server.getPlayerList().placeNewPlayer(connection, bot2, CommonListenerCookie.createInitial(profile, false));
+            }
+            return server.getPlayerList().getPlayer(ID2) == bot2;
+        }));
+        steps.add(new Step("an invitation alone changes nothing; accepting it makes a party of two with the inviter as leader", 40, new BooleanSupplier() {
+            int phase;
+            @Override public boolean getAsBoolean() {
+                var entry = com.ascensiondungeons.mc.DiveEntry.current;
+                if (phase == 0) {
+                    chat.clear();
+                    chat2.clear();
+                    command("dive invite DiveBot2");
+                    phase = 1;
+                    return false;
+                }
+                if (phase == 1) {
+                    if (!heard("Invited DiveBot2.") || !heard2("DiveBot invites you to dive with them.")) return false;
+                    if (!entry.party(ID).equals(Set.of(ID)) || !entry.party(ID2).equals(Set.of(ID2))) throw new IllegalStateException("nobody joins without accepting");
+                    server.getCommands().performPrefixedCommand(bot2.createCommandSourceStack(), "dive accept");
+                    phase = 2;
+                    return false;
+                }
+                List<UUID> party = List.copyOf(entry.party(ID2));
+                AscensionDungeonsLog.LOG.info("DIVE-E2E party: {}", party);
+                return party.equals(List.of(ID, ID2)) && heard("DiveBot2 joined your party.") && heard2("You joined the party.");
+            }
+        }));
+        steps.add(new Step("only the leader chooses: the guest is told so, and the leader's picker shows the party and the guest's own concerns", 60, new BooleanSupplier() {
+            int phase;
+            @Override public boolean getAsBoolean() {
+                if (phase == 0) {
+                    server.getCommands().performPrefixedCommand(bot2.createCommandSourceStack(), "dive");
+                    command("dive");
+                    phase = 1;
+                    return false;
+                }
+                if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu menu)) return false;
+                String partyItem = menu.getSlot(com.ascensiondungeons.mc.DiveMenu.PARTY).getItem().getHoverName().getString();
+                String normal = String.join(" ", lore(menu.getSlot(0).getItem()));
+                AscensionDungeonsLog.LOG.info("DIVE-E2E party picker: \"{}\"; Normal: {}", partyItem, normal);
+                return partyItem.equals("Your party: 2 players") && heard2("Your party's leader, DiveBot, chooses the dungeon.") && !(bot2.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu)
+                        && (!cobblemon || normal.contains("DiveBot2: You have no Pokémon with you."));
+            }
+        }));
+        steps.add(new Step("the leader picks and both players go into the same dive", 2400, new BooleanSupplier() {
+            int clicks;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                bot2.setInvulnerable(true);
+                var run = manager.get().runOf(ID);
+                if (run.isEmpty()) {
+                    // One click when there is nothing to warn about, two when there is.
+                    if (clicks < 2 && bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu menu) { menu.clicked(0, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot); clicks++; }
+                    return false;
+                }
+                OutbreakDive d = dive();
+                if (d == null || run.get().state() != RunState.ACTIVE || bot2.level() != bot.level()) return false;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E party dive: {} members in {}, {} click(s)", run.get().members().size(), run.get().dungeonType(), clicks);
+                return run.get().members().size() == 2 && manager.get().runOf(ID2).map(r -> r.id().equals(run.get().id())).orElse(false) && "normal".equals(run.get().dungeonType())
+                        && bot.level() != server.overworld() && heard2("DiveBot is taking the party into The Hearthwarden Village");
+            }
+        }));
+        steps.add(new Step("in one party each player hears only what is theirs: the newcomer is taught, the graduate is not, and each has their own way out", 400, () -> {
+            OutbreakDive d = dive();
+            if (!d.lessonsTold(ID2).contains("WELCOME") || d.guideText(ID2) == null || d.portalText(ID) == null || d.portalText(ID2) == null) return false;
+            AscensionDungeonsLog.LOG.info("DIVE-E2E party: newcomer told {} with guide \"{}\" and portal \"{}\"; graduate told {} with portal \"{}\"", d.lessonsTold(ID2), d.guideText(ID2),
+                    d.portalText(ID2), d.lessonsTold(ID), d.portalText(ID));
+            return heard2("Guide: Welcome to your first dive") && !heard("Guide: Welcome to your first dive") && heard("An Outbreak is building here") && !heard2("An Outbreak is building here")
+                    && d.guideText(ID) == null && !d.lessonsTold(ID).contains("WELCOME")
+                    && d.portalText(ID2).endsWith(": your first extraction is free") && d.portalText(ID).endsWith(": beat its gatekeeper, or pay the 35% toll");
+        }));
+        steps.add(new Step("both walk out, each with their own recap, and the party is still together for another go", 200, new BooleanSupplier() {
+            boolean left;
+            @Override public boolean getAsBoolean() {
+                if (!left) { manager.get().leave(ID); manager.get().leave(ID2); left = true; return false; }
+                if (manager.get().runOf(ID).isPresent() || manager.get().runOf(ID2).isPresent() || bot.level() != server.overworld() || bot2.level() != server.overworld()) return false;
+                return heard("You left without extracting.") && heard2("You left without extracting.") && heard("Dive recap: The Hearthwarden Village") && heard2("Dive recap: The Hearthwarden Village")
+                        && com.ascensiondungeons.mc.DiveEntry.current.party(ID).size() == 2;
+            }
+        }));
+        steps.add(new Step("the leader leaving ends the party for both", 20, () -> {
+            command("dive leave");
+            var entry = com.ascensiondungeons.mc.DiveEntry.current;
+            return entry.party(ID).equals(Set.of(ID)) && entry.party(ID2).equals(Set.of(ID2)) && heard("You ended your party.") && heard2("DiveBot ended the party.");
+        }));
     }
 
     /** Loot two chests, hide some of it, read the extraction window and leave through it: free the first time, by the toll after. */
@@ -788,12 +1006,35 @@ public final class DiveE2E {
                 return run != null;
             }
         }));
+        inside(manager, label);
+    }
+
+    private static void inside(Supplier<RunManager> manager, String label) {
         steps.add(new Step(label + ": the player is inside an Outbreak dive", 2400, () -> {
             OutbreakDive d = dive();
             if (d == null || manager.get().runOf(ID).map(r -> r.state() != RunState.ACTIVE).orElse(true)) return false;
             AscensionDungeonsLog.LOG.info("DIVE-E2E {}", d.describe());
             return true;
         }));
+    }
+
+    /** Runs a command as the stand-in player, the way typing it would. */
+    private static void command(String command) {
+        bot.server.getCommands().performPrefixedCommand(bot.createCommandSourceStack(), command);
+    }
+
+    /** The lines of an item's description, as plain text. */
+    private static List<String> lore(ItemStack stack) {
+        List<String> out = new ArrayList<>();
+        var lore = stack.get(net.minecraft.core.component.DataComponents.LORE);
+        if (lore != null) for (var line : lore.lines()) out.add(line.getString());
+        return out;
+    }
+
+    /** The picker's slot for a dungeon, by its name; -1 if it is not offered. */
+    private static int slotOf(com.ascensiondungeons.mc.DiveMenu menu, String name) {
+        for (int i = 0; i < 18; i++) if (menu.getSlot(i).getItem().getHoverName().getString().equals(name)) return i;
+        return -1;
     }
 
     private static int shown, itemsBefore;

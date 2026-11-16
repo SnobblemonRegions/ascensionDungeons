@@ -283,6 +283,15 @@ class OnboardingTest {
     }
 
     @Test
+    void thePointerAloneSaysWhichWayHowFarAndWhichLevel() {
+        assertEquals("\u2191 14m", Onboarding.pointer(0, 0, 14, 0));
+        assertEquals("\u2192 9m, above you", Onboarding.pointer(-9, 8, 0, 0));
+        assertEquals("\u2193 30m, below you", Onboarding.pointer(0, -8, -30, 0));
+        assertEquals(Onboarding.HERE, Onboarding.pointer(1, 2, 1, 0));
+        assertEquals("\u2191 1m, below you", Onboarding.pointer(0, -3, 1, 0), "right above or below is not here");
+    }
+
+    @Test
     void longLinesAreWrappedOnSpaces() {
         List<String> lines = Onboarding.wrap("Pay the toll and lose 35% of your unbanked loot, or challenge the gatekeeper", 30);
         for (String line : lines) assertTrue(line.length() <= 30, line);

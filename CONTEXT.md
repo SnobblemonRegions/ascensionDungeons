@@ -71,6 +71,19 @@ _Avoid_: death, wipe.
 **Run mark**: The custom-data tag (`ascension_run`) on an item looted in a dive that has not been banked. A failed exit removes marked items.
 _Avoid_: soulbound, bound (AscensionLib uses "bound" for untradable wallet materials).
 
+## Getting in
+
+**Picker**: The window `/dive` opens: the type dungeons, gentlest first, each with what it asks and what this player is not ready for.
+_Avoid_: lobby (CobbleTowers' word), menu.
+
+**Check at the door**: What the picker says a player lacks for a dungeon: a team, a strong enough team, room for loot, experience. It warns; it never refuses.
+_Avoid_: requirement, gate, lock.
+
+**Party**: The players who go into a dive together: a leader and the guests who accepted their invitation. Also Cobblemon's word for a player's six Pokémon; say "team" for that here.
+
+**Recap**: What a player is told as a dive ends: how it ended, what they kept and lost, and a tip.
+_Avoid_: summary, results screen.
+
 ## The tutorial
 
 **Tutorial**: What a player who has never extracted is taught during their dives: lessons and the Guide bar. Per player.

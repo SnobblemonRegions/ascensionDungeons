@@ -335,10 +335,19 @@ public final class Onboarding {
 
     /** The Guide bar's words: the goal, then which way and how far, and whether it is a level up or down. */
     public static String guideLine(Goal goal, double dx, double dy, double dz, float yaw) {
+        String where = pointer(dx, dy, dz, yaw);
+        return "Guide: " + goal.text() + (where.equals(HERE) ? " (" + HERE + ")" : "  " + where);
+    }
+
+    /** What {@link #pointer} says when the target is within two blocks on the player's own level. */
+    public static final String HERE = "right here";
+
+    /** Which way a target is and how far, relative to the way the player faces: an arrow, metres, and "above you" or "below you". */
+    public static String pointer(double dx, double dy, double dz, float yaw) {
         int far = (int) Math.round(Math.sqrt(dx * dx + dz * dz));
         String level = dy <= -3 ? ", below you" : dy >= 3 ? ", above you" : "";
-        if (far <= 2 && level.isEmpty()) return "Guide: " + goal.text() + " (right here)";
-        return "Guide: " + goal.text() + "  " + arrow(dx, dz, yaw) + " " + far + "m" + level;
+        if (far <= 2 && level.isEmpty()) return HERE;
+        return arrow(dx, dz, yaw) + " " + far + "m" + level;
     }
 
     /** Breaks a line into pieces no longer than {@code width}, on spaces, for an item's description. */

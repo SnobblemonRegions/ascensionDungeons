@@ -52,6 +52,11 @@ public final class AscensionDungeons implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, env) ->
                 new DungeonCommands(() -> manager).register(dispatcher));
 
+        // A player who logs off leaves their dive party, and invitations to or from them are dropped.
+        net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            com.ascensiondungeons.mc.DiveEntry entry = com.ascensiondungeons.mc.DiveEntry.current;
+            if (entry != null) entry.forget(handler.getPlayer().getUUID());
+        });
         ServerLifecycleEvents.SERVER_STARTING.register(server -> {
             OrphanSweeper.sweep(server);
             com.ascensiondungeons.mc.DungeonTemplates.preload();
@@ -74,7 +79,12 @@ public final class AscensionDungeons implements ModInitializer {
             com.ascensiondungeons.mc.AuthoredBridges.Ascension asc = FabricLoader.getInstance().isModLoaded("ascensionlib") ? com.ascensiondungeons.mc.AscensionBridge.tryCreate() : null;
             // Built whenever Cobblemon is present: Outbreak dives always use it, other authored dungeons only with authoredCombat.
             com.ascensiondungeons.mc.AuthoredBridges.Combat combat = pk != null ? newCombat(cfg) : null;
-            if (pk != null) com.ascensiondungeons.mc.RunLoot.partyItems = newPartyItems();
+            if (pk != null) {
+                com.ascensiondungeons.mc.RunLoot.PartyItems items = newPartyItems();
+                com.ascensiondungeons.mc.RunLoot.partyItems = items;
+                com.ascensiondungeons.mc.DiveEntry.teamInfo = (com.ascensiondungeons.mc.DiveEntry.TeamInfo) items;
+            }
+            com.ascensiondungeons.mc.DiveEntry.current = new com.ascensiondungeons.mc.DiveEntry(server, () -> manager, cfg);
             auth.bridges(cfg, pk, rb, asc, combat);
             host.ascension(asc);
             com.ascensiondungeons.mc.AuthoredDirector.current = auth;
@@ -119,6 +129,8 @@ public final class AscensionDungeons implements ModInitializer {
             com.ascensiondungeons.mc.RunLoot.runOfDimension = null;
             com.ascensiondungeons.mc.RunLoot.chestListener = null;
             com.ascensiondungeons.mc.RunLoot.partyItems = null;
+            com.ascensiondungeons.mc.DiveEntry.teamInfo = null;
+            com.ascensiondungeons.mc.DiveEntry.current = null;
             arenas = java.util.List.of();
         });
     }

@@ -23,7 +23,7 @@ AscensionLib settlement per player. A knock-out, timeout, walk-out or disconnect
 wallet are never at risk. The gatekeeper grows with the Outbreak, so the longer a party stays, the more it carries and the harder
 it is to keep all of it: that is the decision the whole run builds up to.
 
-## What a player meets (`/dungeon type <type>`)
+## What a player meets (`/dive`, or `/dungeon type <type>` for an operator)
 
 - **Outbreak bar.** Stage 0 to 5: Calm, Restless, Agitated, Swarming, Rampage, Mass Outbreak. One stage per 6 minutes; a run lasts
   45. Each stage survived adds a win to everyone's haul. The zone tier rises one per two stages.
@@ -198,6 +198,44 @@ window.
 them inside one dive, `mc/OnboardingStore` keeps them, `mc/GuideMenu` is the window, and `OutbreakDive` tells the coach what
 each player is near or going through.
 
+## Getting in
+
+Before this there was no way in for a player: `/dungeon type` is for operators, and `/dungeon start` opens the outdated
+generator. Now:
+
+- **`/dive`** opens the picker, a chest window (no client mod): the type dungeons, gentlest first (by tier, then gatekeeper
+  level, then name). Each shows its type and tier, the levels of its ordinary enemies and of its gatekeepers, and its length.
+- **The check at the door** is written on every dungeon in the picker, for this player: no Pokémon with them, every Pokémon
+  fainted, the strongest below the level the dungeon's enemies start at, fewer than six free inventory slots. It names what
+  would spoil the dive; it never refuses. A dungeon with something to say warns in chat on the first click and goes in on the
+  second. One with nothing to say goes in on the first.
+- **A first dive is steered, not locked.** For a player who has never extracted, the gentlest dungeon (Normal, tier 1) is marked
+  "Recommended for your first dive", and any higher tier counts as something to warn about.
+- **Parties are by invitation.** `/dive invite <player>` asks; the guest joins with `/dive accept` (or the button in chat)
+  within 60 seconds; `/dive leave` leaves, and a leader leaving ends the party; `/dive party` lists it. The leader picks the
+  dungeon and everyone goes in together, up to `maxPartySize`. Each guest's own concerns are shown to the leader by name.
+  Nobody is taken into a dungeon they did not accept, and logging off leaves the party.
+- **Config** (`config/ascensiondungeons.json`): `playerDives: false` makes `/dive` operator-only, for a server that opens it
+  from an NPC; `partyInviteSeconds` sets how long an invitation stands.
+
+`outbreak/Readiness` and `outbreak/PartyBook` hold the rules (pure, unit tested); `mc/DiveEntry` and `mc/DiveMenu` show and
+apply them; a dungeon's card comes from its own `layout.json` and `outbreak.json` (`AuthoredLayout.card()`).
+
+## When a dive ends: the recap
+
+Every player is told, in chat, as they leave: how it ended (and what knocked them out, when something did), the Outbreak
+stage and how long they were inside, how many chests they opened and whether they reached the Depths, the looted items and
+wins they kept and lost, and one tip chosen from what actually happened: a spell knock-out is told about the ring, a
+knock-out with nothing banked about checkpoints, an early toll that the gatekeeper was at its weakest, a clean exit that
+never went down about the Depths. `outbreak/Recap` holds the wording and the rules for the tip (pure, unit tested).
+
+## The way out, for everyone
+
+The portal's boss bar is each player's own. It carries the same news for all (idle, the gatekeeper's health, open and for
+how long) and, for that player, an arrow, a distance and "above you" or "below you" to the way out from where they stand:
+the portal when they are upstairs; from the Depths, the maze's doorway first, then the tunnel's mouth. It stays after the
+tutorial is finished, so nobody loses a haul to being lost in the maze.
+
 ## Chest models
 
 `tools/outbreak/make_chest_pack.py resourcepack [preview.png]` draws eleven original models and writes `resourcepack/`;
@@ -209,17 +247,17 @@ see a floating chorus fruit. A chest is always identifiable without it (label, s
 
 | What | How | Result |
 |---|---|---|
-| Rules and data | `./gradlew test` | 233 tests pass. Includes 300 seeds of Depths (every standing cell reachable, sealed shell, loops, lighting); a body three blocks square and six tall reaching every room of the maze over 60 seeds; the link (never breaks into another room, never beside water or sand, never through a mechanism, sloped walls, half steps, the widest size the wall allows); the tutorial's rules (each lesson once, pacing, urgent lessons first, goals, graduation, the free first extraction and that starting over does not restore it, off and reset, the arrow); and, for all 17 type dungeons: valid settings, full feature placement on sound ground for 40 seeds each, a five-by-six tunnel found, a walk from the entry cell through the tunnel to the maze's first room, to its farthest room and back, and the big body making the same trip |
+| Rules and data | `./gradlew test` | 250 tests pass. Includes 300 seeds of Depths (every standing cell reachable, sealed shell, loops, lighting); a body three blocks square and six tall reaching every room of the maze over 60 seeds; the link (never breaks into another room, never beside water or sand, never through a mechanism, sloped walls, half steps, the widest size the wall allows); the check at the door (each concern, their order, steering a first dive without locking it), the party book (nobody joins without accepting, invitations run out, one party at a time, a leader leaving ends it), the recap (every way out, the tip for each situation); the tutorial's rules (each lesson once, pacing, urgent lessons first, goals, graduation, the free first extraction and that starting over does not restore it, off and reset, the arrow); and, for all 17 type dungeons: valid settings, full feature placement on sound ground for 40 seeds each, a five-by-six tunnel found, a walk from the entry cell through the tunnel to the maze's first room, to its farthest room and back, and the big body making the same trip |
 | Every type dungeon, whole mod set | `DUNGEONSPIKE_DIVE=all ./gradlew runServer` (`spike/DiveE2E`): a stand-in player joins through the normal login path and plays a short dive in each (its free first extraction set aside, so the toll is checked in all seventeen) | 138/138. In each dungeon a wave of that type's Pokémon spawns; a walk is found through the blocks that are really in the world from where the player lands, through the tunnel, down eight half-slab steps and into the Depths, and the player is moved along it; the dive notices them arrive; a chest down there gives marked loot; the walk back up to the entrance room exists and is followed; the toll is shown and paying it lets the player out |
-| One long dive, whole mod set | `DUNGEONSPIKE_DIVE=1 ./gradlew runServer` (water) | 51/51. Tutorial: a first-time player gets the welcome in chat and as a title instead of the briefing, and a Guide bar pointing at a chest; the Outbreak and enemies are explained one at a time; the Depths and unbanked loot are explained and the Guide bar turns to getting out; the knock-out is explained and the player stays a rookie; the guide window has a page per lesson and nothing can be taken; progress survives a save and reload; the second dive has the ordinary briefing, repeats nothing and keeps the Guide bar. **Free first extraction: the window showed 7 of 19 unbanked items and a "Leave free" button, and leaving took nothing, not even the item hidden on a Pokémon; it graduated the player and was used up; starting the tutorial over did not give it back; the next extraction showed 8 of 23 and took exactly those.** Also: enemies are uncatchable, unbattleable Pokémon that hunt and hurt the player; the walk down and back; a Pokémon that spawned in the entrance room chased the player down the stairway to its foot; checkpoint; knock-out; loot hidden on a party Pokémon is banked, stripped or forfeit; beating the gatekeeper opens the portal |
-| The same over the real protocol | `tools/outbreak/dive_bot.js`: a mineflayer bot with its own client physics and pathfinding, server without Cobblemon | 37/37. Over real packets: the welcome arrives as chat and as a screen title with its subtitle; the Guide bar arrives as a boss bar reading "Open a loot chest" with an arrow and a distance, and later "Get back to the extraction portal and leave"; lessons were told as their subjects were met, none twice; `/dungeon guide` opens a window of 22 pages and nothing can be taken. **The first extraction's window is titled "your first is free", shows what the toll would take, and leaving takes nothing; `/dungeon tutorial` then reads "First extraction: used"; the second extraction's window asks for the toll and takes exactly what it showed; starting the tutorial over does not give the free one back.** The bot **walked** from the tunnel's mouth down the stairway to a chest in the Depths (93 blocks, 8 down) and back up, and on the final run the server did not correct its position once (the way up took a second try; see below). Marking, banking, altar, timer chest, outbreak chest, strongbox, knock-out, walk-out, the login sweep and the gatekeeper all pass |
+| One long dive, whole mod set | `DUNGEONSPIKE_DIVE=1 ./gradlew runServer` (water) | 66/66. **Getting in:** `/dive` lists the 17 dungeons gentlest first with Normal recommended; Water warns about its tier and the missing team, the first click only warns and the second goes in; after a dive with two level-5 Pokémon the picker says the team is under-levelled. **Recap:** after a knock-out, the free extraction, the toll (it counts exactly what the toll took) and the gatekeeper. **Way out:** the portal bar reads "↓ 4m" at the entrance and "↙ 102m" from the Depths. **Two players:** one invites, the other accepts, the guest is told the leader chooses, the leader's picker shows the guest's concerns by name, both go into the same dive, the newcomer is welcomed and given a Guide bar while the graduate gets only the briefing, each has their own portal bar, both walk out with their own recap, and the leader leaving ends the party. Tutorial: a first-time player gets the welcome in chat and as a title instead of the briefing, and a Guide bar pointing at a chest; the Outbreak and enemies are explained one at a time; the Depths and unbanked loot are explained and the Guide bar turns to getting out; the knock-out is explained and the player stays a rookie; the guide window has a page per lesson and nothing can be taken; progress survives a save and reload; the second dive has the ordinary briefing, repeats nothing and keeps the Guide bar. **Free first extraction: the window showed 7 of 19 unbanked items and a "Leave free" button, and leaving took nothing, not even the item hidden on a Pokémon; it graduated the player and was used up; starting the tutorial over did not give it back; the next extraction showed 8 of 23 and took exactly those.** Also: enemies are uncatchable, unbattleable Pokémon that hunt and hurt the player; the walk down and back; a Pokémon that spawned in the entrance room chased the player down the stairway to its foot; checkpoint; knock-out; loot hidden on a party Pokémon is banked, stripped or forfeit; beating the gatekeeper opens the portal |
+| The same over the real protocol | `tools/outbreak/dive_bot.js`: a mineflayer bot with its own client physics and pathfinding, server without Cobblemon | 46/46 on the last run. Over real packets: `/dive` opens a window titled "Choose a dungeon" with 17 dungeons, the gentlest first and recommended; clicking Water warns in chat and starts nothing; the second click goes in; the portal bar reads "Extraction portal ↓ 4m: your first extraction is free"; every exit is followed by its recap in chat, and the toll's recap counts exactly what was taken; the welcome arrives as chat and as a screen title with its subtitle; the Guide bar arrives as a boss bar reading "Open a loot chest" with an arrow and a distance, and later "Get back to the extraction portal and leave"; lessons were told as their subjects were met, none twice; `/dungeon guide` opens a window of 22 pages and nothing can be taken. **The first extraction's window is titled "your first is free", shows what the toll would take, and leaving takes nothing; `/dungeon tutorial` then reads "First extraction: used"; the second extraction's window asks for the toll and takes exactly what it showed; starting the tutorial over does not give the free one back.** The bot **walked** from the tunnel's mouth down the stairway to a chest in the Depths (93 blocks, 8 down) and back up, and on the final run the server did not correct its position once (the way up took a second try; see below). Marking, banking, altar, timer chest, outbreak chest, strongbox, knock-out, walk-out, the login sweep and the gatekeeper all pass |
 | Chest pack | `ChestLookTest` | ids in the pack match the code; every model and texture exists |
 
 Use `-Dascensiondungeons.outbreakSpeed=12` for the live checks or they take many minutes.
 
 The bot runs the Outbreak at twelve times speed, which makes it a harsher place than the game: by the time it walks to the
-Depths it is three or four stages up, with a dozen enemies casting. Over four full runs against the finished mod it scored
-36, 37, 36 and 37 of 37; each miss was one of the two walk checks, and the bot script was hardened after each. What went wrong
+Depths it is three or four stages up, with a dozen enemies casting. Before the bot was hardened it missed one of its two walk checks
+in about half its runs (36 of 37); since, it has scored 45 of 46 and then 46 of 46. What went wrong
 along the way, and what was done:
 
 - A stage rose a second after the extraction window opened, and the dive rightly showed the window again rather than take
@@ -227,23 +265,27 @@ along the way, and what was done:
   all, since nothing is taken.
 - A spell threw the bot into the air as it set off down the tunnel, and its pathfinder gave up three blocks in. The walk checks
   now clear the enemies around the bot first and try again if a walk stops short.
-- In the 36/37 run the bot spent minutes being put back by the server somewhere on the 90-block way up, then got through on
-  a later try. Where was not recorded then; it is now. Walking the stairway alone, up and down on each of its five lanes
-  (fourteen walks, normal speed, no enemies), the server did not correct the bot once, so it was not the stairs. The earlier
-  fault of the bot's physics library, pressed against a block face near the world's origin, is the likely cause; a walk is now
-  judged on the attempt that arrives, with no correction that moves the bot two blocks or more, and earlier attempts are printed.
+- In one run the bot spent minutes being put back by the server, then got through on a later try. With the place recorded
+  the cause was plain: it was being put back exactly where a `/tp` had just placed it. The bot library goes on sending its old
+  position for a while after a teleport and the server answers each one ("moved too quickly" in the server log, hundreds of
+  them, none of them in a walk). The bot now waits for that to stop before it walks. Walking the stairway alone, up and down
+  on each of its five lanes (fourteen walks, normal speed, no enemies), the server did not correct the bot once.
+- The pathfinder sometimes stops partway with no correction at all and is sent on again; the last run's way down took three
+  goes. A walk is judged on the attempt that arrives, with no correction that moves the bot two blocks or more, and where the
+  earlier goes stopped is printed.
 
 Another thing the bot found, earlier: with full-block steps (the first version of the stairway) it stuck on the top step coming
 up. Client and server agreed on every block there; the bot's physics library has a rounding fault when pressed against a block
 face at coordinate -2 and walked itself into the block, which the server refused. That is the library, not the stairway, but
 jumping eight times up a corridor is clumsy for anyone, so the steps became half slabs and the fault no longer arises.
 
-**Not verified.** How any of it looks and feels in a real client, the tunnel and stairway included: they are checked by walking
+**Not verified.** A party over the real protocol (the two-player check uses stand-in players inside the server; the protocol
+bot is one player). More than two players. How any of it looks and feels in a real client, the tunnel and stairway included: they are checked by walking
 the real blocks from code and by a protocol bot, not by eye. The same goes for the tutorial: that the words arrive is checked,
 whether they read well at the pace they come is not, and the arrows in the Guide bar have not been seen in the game's font. The
 portal lesson and the time-running-out lesson were not reached in a live run (their triggers are a line each; the words and
 pacing are unit tested). Whether a Pokémon as large as a Golurk really paths through the five-wide tunnel: the size is checked
-against Cobblemon's hitbox data and by a block model, not with the creature. More than one player. A live AscensionLib (its jar needs a local
+against Cobblemon's hitbox data and by a block model, not with the creature. A live AscensionLib (its jar needs a local
 `webgui-dev.jar` and cannot be built here), so payouts are covered only by unit tests of the grouping and by log lines. The
 authored boss flow inside a dive. Whether a gatekeeper is beatable but hard at each stage: its numbers are guesses and need play.
 Performance with four players in the Depths at stage 5. The chest models in a client.
@@ -271,7 +313,13 @@ Performance with four players in the Depths at stage 5. The chest models in a cl
 16. **Graduation is the first extraction**, not a number of dives: the loop is learned when it has been closed once.
 17. **Leaving with nothing unbanked is not an extraction for the tutorial**: it neither graduates the player nor uses up the
     free one. Otherwise walking in and straight out would spend it.
-18. **The portal is explained only once the player carries loot.** It stands in the entrance room, and explaining the toll to
+18. **The check at the door warns and never refuses**, a high tier on a first dive included. A lock would also lock a new
+    player out of a friend's party; a warning and a second click leaves the choice with them.
+19. **Parties are made by invitation and acceptance**, kept in memory, and end when the leader leaves or logs off. There was
+    no party system to reuse (CobbleTowers has its own lobby). If the server already groups players some other way, this is
+    the piece to swap.
+20. **`/dive` is open to every player by default.** `playerDives: false` restricts it.
+21. **The portal is explained only once the player carries loot.** It stands in the entrance room, and explaining the toll to
     someone with nothing to lose is noise.
 
 ## Known gaps and next steps

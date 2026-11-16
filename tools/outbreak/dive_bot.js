@@ -1,6 +1,6 @@
 // Live check of an Outbreak dive in the water dungeon, played by a mineflayer bot against a real dev server.
 //
-// It loots rarity chests, banks at a checkpoint, uses a curse altar, waits for a timer chest, opens an outbreak chest and a
+// It gets in the way a player does (/dive, the picker, a warning, a second click), loots rarity chests, banks at a checkpoint, uses a curse altar, waits for a timer chest, opens an outbreak chest and a
 // strongbox, checks the first-dive tutorial (welcome, title, Guide bar, guide window, graduation), walks out through the tunnel and down the stairway into the Depths and back up again (its own client physics, no
 // teleport), reads the extraction screen, leaves free on its first extraction and pays the 35% toll on its second; then it checks a
 // knock-out, a walk-out, a disconnect, and beating the gatekeeper.
@@ -32,6 +32,8 @@ function connect() {
     bot.on('message', m => bot.log.push(m.toString()));
     bot.on('actionBar', m => bot.bars.push(m.toString()));
     bot.on('kicked', r => console.log('KICKED', JSON.stringify(r).slice(0, 120)));
+    bot.lastForced = 0;
+    bot.on('forcedMove', () => { bot.lastForced = Date.now(); });
     bot.on('error', e => {});
     bot.once('spawn', async () => { await sleep(2500); resolve(bot); });
   });
@@ -62,6 +64,9 @@ async function walkTo(bot, x, y, z, range, ms = 150000) {
     await cmd(bot, '/kill @e[type=!minecraft:player,type=!minecraft:text_display,type=!minecraft:item_display,type=!minecraft:item,distance=..48]', 600);
     await cmd(bot, '/effect clear @s minecraft:levitation', 300);
     for (let i = 0; i < 20 && !bot.entity.onGround; i++) await sleep(250);
+    // After a /tp the bot library goes on sending its old position for a while and the server puts it back each time (the
+    // "moved too quickly" lines in the server log). Let that finish, or it is counted against the walk.
+    for (let i = 0; i < 60 && Date.now() - bot.lastForced < 1500; i++) await sleep(250);
     if (attempt > 0) { bot.clearControlStates(); bot.setControlState('back', true); await sleep(400); bot.clearControlStates(); await sleep(300); }   // step back off whatever it was pressed against
     const one = await walkOnce(bot, x, y, z, range, ms);
     // The walk is judged on the attempt that gets there; where an earlier attempt stuck is kept and printed.
@@ -115,10 +120,42 @@ async function tollWindow(bot, portal) {
   for (let i = 0; i < 36; i++) { const it = w.slots[i]; if (it) { shown += it.count; names.push(it.count + 'x' + it.name); } }
   return { window: w, shown, names, title: (typeof w.title === 'string' ? w.title : JSON.stringify(w.title)).slice(0, 200), pay: w.slots[45] && w.slots[45].name, fight: w.slots[49] && w.slots[49].name };
 }
+// A player's way in: /dive opens the picker; a dungeon that is not the recommended first one warns on the first click and
+// starts on the second. Leaves the bot inside a water run, like startRun.
+async function enterByPicker(bot) {
+  await cmd(bot, '/clear', 600);
+  const text = it => JSON.stringify(it && it.nbt ? it.nbt : it && it.components ? it.components : it || {});
+  const opened = new Promise(resolve => { const t = setTimeout(() => resolve(null), 6000); bot.once('windowOpen', w => { clearTimeout(t); resolve(w); }); });
+  bot.chat('/dive');
+  const w = await opened;
+  await sleep(600);
+  const items = w ? w.slots.slice(0, 18).map((it, i) => ({ i, s: text(it) })).filter(x => x.s !== '{}') : [];
+  const water = items.find(x => /Drowned Reservoir/.test(x.s)), normal = items.find(x => /Hearthwarden Village/.test(x.s));
+  check('A /dive opens a picker of the seventeen type dungeons, gentlest first', !!w && items.length === 17 && !!normal && normal.i === 0 && !!water
+    && /Choose a dungeon/.test(typeof w.title === 'string' ? w.title : JSON.stringify(w.title)), w ? items.length + ' dungeons' : 'no window');
+  check('A the gentlest dungeon is recommended for a first dive, and a harder one says so', !!normal && /Recommended for your first dive/.test(normal.s) && !!water
+    && /This is a tier 3 dungeon/.test(water.s) && /Enemies: level 12 to 30/.test(water.s) && !/Recommended/.test(water.s), water ? water.s.slice(0, 200) : '');
+  if (!w || !water) return null;
+  const n = bot.log.length;
+  try { await bot.clickWindow(water.i, 0, 0); } catch (e) {}
+  await sleep(1200);
+  const st = await cmd(bot, '/dungeon status', 900);
+  check('A the first click only warns', bot.log.slice(n).some(l => /before you go in/.test(l)) && bot.log.slice(n).some(l => /For a first dive, The Hearthwarden Village/.test(l))
+    && /not in a dungeon run/.test(st), bot.log.slice(n).filter(l => /first dive|before you go in/.test(l)).join(' | '));
+  const n2 = bot.log.length;
+  try { await bot.clickWindow(water.i, 0, 0); } catch (e) {}
+  let active = false;
+  for (let i = 0; i < 60 && !active; i++) { const s = await cmd(bot, '/dungeon status', 1000); active = /ACTIVE/.test(s); }
+  check('A the second click goes in', active && bot.log.slice(n2).some(l => /Entering The Drowned Reservoir \(Water, tier 3\)/.test(l)), bot.log.slice(n2).filter(l => /Entering/.test(l))[0]);
+  return finishStart(bot, 'picker');
+}
 async function startRun(bot) {
   await cmd(bot, '/clear', 600);
   const r = await cmd(bot, '/dungeon type water', 1000);
   for (let i = 0; i < 60; i++) { const s = await cmd(bot, '/dungeon status', 1000); if (/ACTIVE/.test(s)) break; }
+  return finishStart(bot, r);
+}
+async function finishStart(bot, r) {
   await sleep(3500);
   await cmd(bot, '/effect give @s minecraft:resistance infinite 255 true', 500);
   const d = await cmd(bot, '/dungeon dive', 1500);
@@ -147,8 +184,14 @@ async function confirmPay(bot, since) {
   let bot = await connect();
   try {
     // ---------------- A: the full loop, ending in an extraction
-    let run = await startRun(bot);
+    let r = await cmd(bot, '/dive party', 900);
+    const selfInvite = await cmd(bot, '/dive invite RunBot', 900);
+    check('A the party commands answer: alone, and nobody invites themselves', /You are diving alone/.test(r) && /already in your own party/.test(selfInvite), r + ' || ' + selfInvite);
+    let run = await enterByPicker(bot);
+    if (!run) run = await startRun(bot);
     check('A run is an Outbreak dive with features', run.feats.length >= 8, run.describe.split('|')[0] + ' feats=' + run.feats.length);
+    const portalBar = () => Object.values(bot.boss).find(t => /^Extraction portal/.test(t));
+    check("A the portal's bar points the way out and says the first extraction is free", /^Extraction portal (\S+ \d+m(, (above|below) you)?|right here): your first extraction is free$/.test(portalBar() || ''), portalBar());
     const kinds = k => run.feats.filter(f => f.kind === k);
     // a player who has never dived gets the tutorial instead of the briefing: a welcome in chat and on screen, and a Guide bar
     const guideBar = () => Object.values(bot.boss).find(t => /^Guide: /.test(t));
@@ -172,7 +215,7 @@ async function confirmPay(bot, since) {
     opened = await use(bot, chests[0].x, chests[0].y, chests[0].z);
     let i1 = await inv(bot);
     check('A chest loot is marked with the run', opened && i1.items > 0 && i1.tagged === i1.items, `${chests[0].rarity} chest: ${i1.items} stacks, ${i1.tagged} marked`);
-    let r = await cmd(bot, '/dungeon dive bank', 1500);
+    r = await cmd(bot, '/dungeon dive bank', 1500);
     let i2 = await inv(bot);
     check('A a checkpoint banks: items stay, marks go', /haul is banked/.test(r) && i2.items === i1.items && i2.tagged === 0, r);
     opened = await use(bot, chests[1].x, chests[1].y, chests[1].z);
@@ -245,6 +288,10 @@ async function confirmPay(bot, since) {
     check('A the player is out of the run', /not in a dungeon run/.test(r), r);
     // leaving through the portal finishes the tutorial
     r = await cmd(bot, '/dungeon tutorial', 1000);
+    const recapA = bot.log.slice(n5).filter(l => /^Dive recap|^  (You extracted|Outbreak: stage|Kept: |Tip: )/.test(l)).map(l => l.trim());
+    check('A the dive ends with a recap: how it ended, the stage, what was kept and lost, and a tip', recapA.length === 5 && recapA[0] === 'Dive recap: The Drowned Reservoir'
+      && recapA[1] === 'You extracted free: your first extraction cost nothing.' && /^Outbreak: stage \d \(.+\) after \d+m \d\ds\. Chests opened: \d+\.$/.test(recapA[2])
+      && /^Kept: \d+ items?, \d+ wins?\. Lost: 0 items, 0 wins\.$/.test(recapA[3]) && /^Tip: /.test(recapA[4]), recapA.join(' | '));
     check('A the free extraction is explained, finishes the tutorial and is used up', bot.log.some(l => /Guide: Extracted/.test(l)) && bot.log.some(l => /Your first extraction was free/.test(l))
       && bot.titles.some(t => /Extracted/.test(t)) && /Dive tutorial: finished/.test(r) && /extractions 1/.test(r) && /First extraction: used/.test(r), r);
 
@@ -267,6 +314,9 @@ async function confirmPay(bot, since) {
       const out = await confirmPay(bot, nT);
       await sleep(2000);
       const left = await inv(bot);
+      const recap2 = bot.log.slice(nT).filter(l => /^  (You extracted|Kept: )/.test(l)).map(l => l.trim());
+      check('A2 the recap counts exactly what the toll took', recap2[0] === 'You extracted by paying the toll.' && !!t1 && new RegExp('^Kept: ' + (had.total - t1.shown) + ' items?, \\d+ wins?\\. Lost: ' + t1.shown + ' items?, ').test(recap2[1] || ''),
+        recap2.join(' | '));
       check('A2 paying the toll takes exactly what was shown and lets the player out', out && !!t1 && left.total === had.total - t1.shown && left.tagged === 0,
         `${had.total} item(s) before, toll showed ${t1 ? t1.shown : '?'}, ${left.total} after, ${left.tagged} marked | ${bot.log.slice(nT).filter(l => /Toll paid/.test(l))[0] || ''}`);
       await cmd(bot, '/clear', 600);
@@ -282,6 +332,8 @@ async function confirmPay(bot, since) {
     await cmd(bot, '/kill @s', 2500);
     const hp = await cmd(bot, '/data get entity @s Health', 1000);
     const b2 = await inv(bot);
+    check('B the knock-out is recapped with a tip', bot.log.slice(n3).some(l => /^Dive recap: The Drowned Reservoir/.test(l)) && bot.log.slice(n3).some(l => /^  You were knocked out/.test(l))
+      && bot.log.slice(n3).some(l => /^  Tip: /.test(l)), bot.log.slice(n3).filter(l => /knocked out|Tip: |Kept: /.test(l)).join(' | '));
     check('B a lethal hit knocks out instead of killing', bot.log.slice(n3).some(l => /Knocked out/.test(l)) && /entity data: [1-9][\d.]*f/.test(hp), hp);
     check('B unbanked loot is taken, nothing else', b1.tagged > 0 && b2.items === 0 && b2.tagged === 0, `${b1.items} stacks before (${b1.tagged} marked), ${b2.items} after`);
     r = await cmd(bot, '/dungeon status');

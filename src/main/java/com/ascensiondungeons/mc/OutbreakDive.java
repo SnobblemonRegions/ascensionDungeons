@@ -11,6 +11,7 @@ import com.ascensiondungeons.outbreak.FeaturePlanner;
 import com.ascensiondungeons.outbreak.Haul;
 import com.ascensiondungeons.outbreak.Onboarding;
 import com.ascensiondungeons.outbreak.OutbreakClock;
+import com.ascensiondungeons.outbreak.Recap;
 import com.ascensiondungeons.outbreak.Spell;
 import com.ascensiondungeons.outbreak.Toll;
 import com.ascensiondungeons.outbreak.WavePlanner;
@@ -150,7 +151,24 @@ public final class OutbreakDive {
     private final Set<UUID> settled = new HashSet<>();
     /** Creatures that take only a share of each hit: 4.0 means a quarter. This is how a Pokémon enemy is made tough (see {@link #scale}). */
     private final Map<UUID, Double> toughness = new HashMap<>();
-    private final ServerBossEvent outbreakBar, portalBar;
+    private final ServerBossEvent outbreakBar;
+    /** The portal's bar, one per player: it also points each of them the way out from where they stand. */
+    private final Map<UUID, ServerBossEvent> portalBars = new HashMap<>();
+    private final Map<UUID, String> portalTexts = new HashMap<>();
+    // ---- what each player did, for the recap when they leave ----
+    private long startedAt;
+    /** Players who went down to the Depths, and players a checkpoint banked for. */
+    private final Set<UUID> everBelow = new HashSet<>(), everBanked = new HashSet<>();
+    /** Looted items a checkpoint made theirs, and items and wins the toll took. */
+    private final Map<UUID, Integer> bankedItems = new HashMap<>(), tollItems = new HashMap<>(), tollWins = new HashMap<>();
+    /** The last thing that hit each player with a spell, and when: a knock-out a moment later was that spell. */
+    private final Map<UUID, String> lastSpell = new HashMap<>();
+    private final Map<UUID, Long> lastSpellAt = new HashMap<>();
+    /** What knocked each player out, and whether it was a spell. */
+    private final Map<UUID, String> knockedOutBy = new HashMap<>();
+    private final Set<UUID> knockedOutBySpell = new HashSet<>();
+    /** True while the run is ending around the players still inside. */
+    private boolean closing;
     private Vec3 portalCentre;
     /** The teleporting stairway to detached Depths and the spot it leads to (both null when the Depths are joined by a tunnel, or absent). */
     private Vec3 descentCentre, returnCentre;
@@ -250,8 +268,6 @@ public final class OutbreakDive {
         for (Feature f : features.values()) f.deep = AuthoredLayout.inDepths(roomOf(Vec3.atBottomCenterOf(f.pos)));
         coach = new DiveCoach(host.level(), tunnelMouth != null || descentCentre != null, tollPercent, firstFree, this::guideTarget);
         outbreakBar = new ServerBossEvent(Component.literal("Outbreak"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.NOTCHED_6);
-        portalBar = new ServerBossEvent(Component.literal("Extraction portal"), BossEvent.BossBarColor.BLUE, BossEvent.BossBarOverlay.PROGRESS);
-        portalBar.setProgress(0f);
     }
 
     // ---- queries ---------------------------------------------------------------------------------------------
@@ -298,6 +314,8 @@ public final class OutbreakDive {
     public String guideText(UUID player) { return coach.guideText(player); }
     /** Test aid: the goal the Guide bar is on for this player, or null. */
     public String guideGoal(UUID player) { return coach.goal(player); }
+    /** Test aid: the portal bar's text for this player (it points their own way out), or null when they have none. */
+    public String portalText(UUID player) { return portalBars.containsKey(player) ? portalTexts.get(player) : null; }
     /** The toll, as a percentage of unbanked loot. */
     public int tollPercent() { return tollPercent; }
     /** Whether the portal would let this player out for nothing right now (their first extraction). */
@@ -323,6 +341,7 @@ public final class OutbreakDive {
         now = tickNow;
         if (clock == null) {
             clock = new OutbreakClock(params, now);
+            startedAt = now;
             nextWaveAt = now + waveEvery;
         }
         for (ServerPlayer p : players) if (greeted.add(p.getUUID())) greet(p);
@@ -377,7 +396,7 @@ public final class OutbreakDive {
             host.level().sendParticles(ParticleTypes.REVERSE_PORTAL, p.getX(), p.getY() + 1, p.getZ(), 40, 0.3, 0.6, 0.3, 0.05);
             p.teleportTo(host.level(), to.x, to.y, to.z, p.getYRot(), p.getXRot());
             sound(BlockPos.containing(to), SoundEvents.ENDERMAN_TELEPORT, 0.8f, down ? 0.7f : 1.3f);
-            if (down) { coach.notice(p, Onboarding.Lesson.DEPTHS, now); coach.enteredDepths(p); }
+            if (down) { everBelow.add(id); coach.notice(p, Onboarding.Lesson.DEPTHS, now); coach.enteredDepths(p); }
             p.displayClientMessage(Component.literal(down ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
         }
     }
@@ -392,7 +411,7 @@ public final class OutbreakDive {
             if (room == null) continue;                                   // in the tunnel, on the stairway or between rooms: no change
             boolean deep = AuthoredLayout.inDepths(room);
             if (deep == below.contains(id)) continue;
-            if (deep) below.add(id); else below.remove(id);
+            if (deep) { below.add(id); everBelow.add(id); } else below.remove(id);
             if (deep) { coach.notice(p, Onboarding.Lesson.DEPTHS, now); coach.enteredDepths(p); }
             p.displayClientMessage(Component.literal(deep ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
         }
@@ -457,9 +476,20 @@ public final class OutbreakDive {
             case LOOT -> { Vec3 chest = nearestChest(p, deep, true); return chest != null ? chest : deep ? up : down; }
             case DESCEND -> { return down; }
             case DEEP_LOOT -> { return deep ? nearestChest(p, true, true) : down; }
-            case EXTRACT -> { return deep || (tunnelMouth != null && p.getY() < tunnelMouth.y - 2) ? up : portalCentre; }
+            case EXTRACT -> { return wayOut(p); }
         }
         return null;
+    }
+
+    /**
+     * Where to head to get out, from where this player stands: the portal when they are up in the dungeon; from the Depths, the
+     * maze's doorway first, then the tunnel's mouth at the top of the stairway.
+     */
+    private Vec3 wayOut(ServerPlayer p) {
+        if (tunnelMouth == null) return below.contains(p.getUUID()) && returnCentre != null ? returnCentre : portalCentre;
+        boolean under = p.getY() < tunnelMouth.y - 2;
+        if (!below.contains(p.getUUID()) && !under) return portalCentre;
+        return under && p.position().distanceToSqr(depthsDoor) > 8 * 8 ? depthsDoor : tunnelMouth;
     }
 
     /** The nearest chest this player has not looted that can be opened now, upstairs or down in the Depths. */
@@ -496,23 +526,36 @@ public final class OutbreakDive {
         outbreakBar.setName(Component.literal("Outbreak: stage " + stage + ", " + name));
         outbreakBar.setColor(stage <= 1 ? BossEvent.BossBarColor.GREEN : stage == 2 ? BossEvent.BossBarColor.YELLOW : stage <= 4 ? BossEvent.BossBarColor.RED : BossEvent.BossBarColor.PURPLE);
         outbreakBar.setProgress((float) clock.progress(now));
-        if (portal.state() == ExtractionPortal.State.OPEN) {
-            portalBar.setName(Component.literal("Extraction portal: OPEN, " + (portal.remaining(now) + 19) / 20 + "s"));
-            portalBar.setColor(BossEvent.BossBarColor.WHITE);
-            portalBar.setProgress(1f);
-        } else if (portal.state() == ExtractionPortal.State.FIGHT && gatekeeper != null) {
-            portalBar.setName(Component.literal(gatekeeper.getName().getString()));
-            portalBar.setColor(BossEvent.BossBarColor.RED);
-            portalBar.setProgress(Math.max(0f, Math.min(1f, gatekeeper.getHealth() / gatekeeper.getMaxHealth())));
-        } else {
-            portalBar.setName(Component.literal("Extraction portal: beat its gatekeeper, or pay the " + tollPercent + "% toll"));
-            portalBar.setColor(BossEvent.BossBarColor.BLUE);
-            portalBar.setProgress(0f);
+        for (ServerPlayer p : players) outbreakBar.addPlayer(p);
+        for (ServerPlayer p : new ArrayList<>(outbreakBar.getPlayers())) if (p.level() != host.level() || p.isRemoved()) outbreakBar.removePlayer(p);
+        // The portal's bar is each player's own: the same news for everyone, and the way out from where that player stands.
+        boolean open = portal.state() == ExtractionPortal.State.OPEN, fight = portal.state() == ExtractionPortal.State.FIGHT && gatekeeper != null;
+        for (ServerPlayer p : players) {
+            if (settled.contains(p.getUUID())) continue;
+            Vec3 to = wayOut(p);
+            String where = Onboarding.pointer(to.x - p.getX(), to.y - p.getY(), to.z - p.getZ(), p.getYRot());
+            String text = open ? "Extraction portal OPEN " + where + ": " + (portal.remaining(now) + 19) / 20 + "s"
+                    : fight ? gatekeeper.getName().getString() + " at the portal " + where
+                    : "Extraction portal " + where + ": " + (coach.firstExtractionFree(p) ? "your first extraction is free" : "beat its gatekeeper, or pay the " + tollPercent + "% toll");
+            ServerBossEvent bar = portalBars.get(p.getUUID());
+            if (bar == null) {
+                bar = new ServerBossEvent(Component.literal(text), BossEvent.BossBarColor.BLUE, BossEvent.BossBarOverlay.PROGRESS);
+                bar.addPlayer(p);
+                portalBars.put(p.getUUID(), bar);
+            } else if (!text.equals(portalTexts.get(p.getUUID()))) {
+                bar.setName(Component.literal(text));
+            }
+            portalTexts.put(p.getUUID(), text);
+            bar.setColor(open ? BossEvent.BossBarColor.WHITE : fight ? BossEvent.BossBarColor.RED : BossEvent.BossBarColor.BLUE);
+            bar.setProgress(open ? 1f : fight ? Math.max(0f, Math.min(1f, gatekeeper.getHealth() / gatekeeper.getMaxHealth())) : 0f);
         }
-        for (ServerBossEvent bar : List.of(outbreakBar, portalBar)) {
-            for (ServerPlayer p : players) bar.addPlayer(p);
-            for (ServerPlayer p : new ArrayList<>(bar.getPlayers())) if (p.level() != host.level() || p.isRemoved()) bar.removePlayer(p);
-        }
+        portalBars.entrySet().removeIf(e -> {
+            ServerPlayer p = host.level().getServer().getPlayerList().getPlayer(e.getKey());
+            if (p != null && p.level() == host.level() && !settled.contains(e.getKey())) return false;
+            e.getValue().removeAllPlayers();
+            portalTexts.remove(e.getKey());
+            return true;
+        });
     }
 
     // ---- haul: checkpoints, the boss, chests ------------------------------------------------------------------
@@ -528,6 +571,8 @@ public final class OutbreakDive {
         for (ServerPlayer p : host.players()) {
             if (settled.contains(p.getUUID())) continue;
             haul.bank(p.getUUID());
+            bankedItems.merge(p.getUUID(), RunLoot.countItems(p, runId()), Integer::sum);
+            everBanked.add(p.getUUID());
             int cleared = RunLoot.clearAll(p, runId());
             Haul.Settlement s = haul.settle(p.getUUID(), Haul.Exit.DIED);
             p.sendSystemMessage(Component.literal(what + ": your haul is banked (" + describe(s) + (cleared > 0 ? ", " + cleared + " item stack(s) secured" : "") + ").").withStyle(ChatFormatting.GREEN));
@@ -578,7 +623,16 @@ public final class OutbreakDive {
      * A hit that would kill a player inside the dive. Nobody dies here: the player is knocked out, loses the unbanked part of
      * their haul and is sent home with everything else they own. Always returns false (the death is cancelled).
      */
-    boolean knockedOut(ServerPlayer p) {
+    boolean knockedOut(ServerPlayer p) { return knockedOut(p, null); }
+
+    /** @param source what landed the hit, for the recap; may be null */
+    boolean knockedOut(ServerPlayer p, net.minecraft.world.damagesource.DamageSource source) {
+        if (!closed && !settled.contains(p.getUUID())) {
+            UUID id = p.getUUID();
+            Entity attacker = source == null ? null : source.getEntity();
+            if (attacker == null && lastSpellAt.getOrDefault(id, Long.MIN_VALUE / 2) >= now - 2) { knockedOutBy.put(id, lastSpell.get(id)); knockedOutBySpell.add(id); }
+            else if (attacker != null) knockedOutBy.put(id, attacker.getName().getString());
+        }
         p.setHealth(p.getMaxHealth());
         p.clearFire();
         p.removeAllEffects();
@@ -594,6 +648,7 @@ public final class OutbreakDive {
     /** Pays one player for the way they left, exactly once, and banks or takes back the loot they carry. */
     private void settle(UUID player, Haul.Exit exit) {
         if (!settled.add(player)) return;
+        int unbankedWins = haul.unbankedWins(player);
         Haul.Settlement s = haul.settle(player, exit);
         int tier = tier();
         for (DiveSettlement.Call call : DiveSettlement.plan(Map.of(player, s), tier)) host.pay(call.tier(), call.arenaWins(), call.bossDefeated(), call.players());
@@ -601,6 +656,7 @@ public final class OutbreakDive {
         int stacks = 0;
         boolean kept = exit == Haul.Exit.EXTRACTED;
         if (online != null) {
+            int carried = RunLoot.countItems(online, runId());
             stacks = kept ? RunLoot.clearAll(online, runId()) : RunLoot.stripAll(online, runId());
             String text = switch (exit) {
                 case EXTRACTED -> "Extracted! You leave with: " + describe(s) + ".";
@@ -617,14 +673,39 @@ public final class OutbreakDive {
                 case DIED -> coach.knockedOut(online, now);
                 default -> coach.leave(online);
             }
+            Recap.Way way = switch (exit) {
+                case EXTRACTED -> closing ? Recap.Way.CLEARED : emptyHanded.contains(player) ? Recap.Way.EMPTY_HANDED : graced.contains(player) ? Recap.Way.FREE
+                        : tolled.contains(player) ? Recap.Way.TOLL : Recap.Way.GATEKEEPER;
+                case DIED -> Recap.Way.KNOCKED_OUT;
+                case TIMED_OUT -> Recap.Way.TIMED_OUT;
+                case LEFT -> Recap.Way.LEFT;
+            };
+            int stage = stage();
+            recap(online, new Recap.Facts(way, stage, STAGE_NAMES[Math.min(stage, STAGE_NAMES.length - 1)], Math.max(0, now - startedAt) / 20,
+                    looted.getOrDefault(player, Set.of()).size(), everBelow.contains(player), bankedItems.getOrDefault(player, 0) + (kept ? carried : 0),
+                    tollItems.getOrDefault(player, 0) + (kept ? 0 : carried), s.arenaWins(), tollWins.getOrDefault(player, 0) + (kept ? 0 : unbankedWins),
+                    everBanked.contains(player), knockedOutBy.get(player), knockedOutBySpell.contains(player), tollPercent));
         }
         AscensionDungeonsLog.LOG.info("[dive] run {} settled {} exit={} arenaWins={} boss={} chests={} tier={} loot {} {} stack(s){}", runId(), player, exit,
                 s.arenaWins(), s.bossDefeated(), s.chests(), tier, kept ? "kept" : "stripped", stacks, online == null ? " (offline: swept on next login)" : "");
     }
 
+    /** What the player is told as they leave: how it ended, what they kept and lost, and one thing to do differently. */
+    private void recap(ServerPlayer p, Recap.Facts facts) {
+        List<String> lines = Recap.lines(host.layout().data().name == null ? host.layout().id() : host.layout().data().name, facts);
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            boolean tip = i == lines.size() - 1;
+            p.sendSystemMessage(i == 0 ? Component.literal(line).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)
+                    : Component.literal("  " + line).withStyle(tip ? ChatFormatting.AQUA : ChatFormatting.GRAY));
+        }
+        AscensionDungeonsLog.LOG.info("[dive] run {} recap for {}: {}", runId(), p.getGameProfile().getName(), facts);
+    }
+
     /** The run is over. Whoever is still inside leaves with everything if the boss fell, otherwise with what they banked. */
     void close() {
         if (closed) return;
+        closing = true;
         coach.close();
         for (Map.Entry<UUID, Run.Member> e : host.run().members().entrySet()) {
             if (settled.contains(e.getKey())) continue;
@@ -633,7 +714,9 @@ public final class OutbreakDive {
         closed = true;
         portal.close();
         outbreakBar.removeAllPlayers();
-        portalBar.removeAllPlayers();
+        for (ServerBossEvent bar : portalBars.values()) bar.removeAllPlayers();
+        portalBars.clear();
+        portalTexts.clear();
         enemies.clear();
     }
 
@@ -916,8 +999,12 @@ public final class OutbreakDive {
                 owed -= take;
             }
         }
+        int hiddenItems = RunLoot.countItems(p, runId());           // after the shown items went: what is left before the hidden loot goes too
         int hidden = RunLoot.stripHidden(p, runId());
+        hiddenItems -= RunLoot.countItems(p, runId());
         int wins = haul.forfeitWins(p.getUUID(), o.plan().winsLost());
+        tollItems.merge(p.getUUID(), o.plan().itemsLost() + hiddenItems, Integer::sum);
+        tollWins.merge(p.getUUID(), wins, Integer::sum);
         AscensionDungeonsLog.LOG.info("[dive] run {} toll paid by {}: {} item(s), {} hidden stack(s), {} win(s) at stage {}", runId(), p.getGameProfile().getName(),
                 o.plan().itemsLost(), hidden, wins, stage());
         p.sendSystemMessage(Component.literal("Toll paid: " + o.plan().itemsLost() + " item(s)" + (hidden > 0 ? ", " + hidden + " hidden stack(s)" : "")
@@ -1053,6 +1140,9 @@ public final class OutbreakDive {
         for (ServerPlayer p : players) {
             double dx = p.getX() - c.x, dz = p.getZ() - c.z;
             if (dx * dx + dz * dz > s.radius() * s.radius() || Math.abs(p.getY() - c.y) > 3 || p.isCreative()) continue;
+            // Remembered before the hit lands: if this one knocks the player out, the recap names it.
+            lastSpell.put(p.getUUID(), s.name() + " (" + en.mob.getName().getString() + ")");
+            lastSpellAt.put(p.getUUID(), now);
             if (s.damage() > 0) p.hurt(level.damageSources().magic(), (float) s.damage());
             if (!p.isAlive() || settled.contains(p.getUUID())) continue;
             int lasting = Math.max(1, (int) (s.strength() * 20));

@@ -26,6 +26,17 @@ public final class DungeonCommands {
     public DungeonCommands(Supplier<RunManager> manager) { this.manager = manager; }
 
     public void register(CommandDispatcher<CommandSourceStack> d) {
+        // /dive: the way in for players. A picker of the type dungeons, and a party made by invitation.
+        d.register(Commands.literal("dive").requires(s -> { DiveEntry e = DiveEntry.current; return e == null || e.openToAll() || s.hasPermission(2); })
+                .executes(ctx -> { DiveEntry e = entry(ctx); if (e == null) return 0; e.open(ctx.getSource().getPlayerOrException()); return 1; })
+                .then(Commands.literal("invite").then(Commands.argument("player", EntityArgument.player()).executes(ctx -> {
+                    DiveEntry e = entry(ctx);
+                    return e != null && e.invite(ctx.getSource().getPlayerOrException(), EntityArgument.getPlayer(ctx, "player")) ? 1 : 0;
+                })))
+                .then(Commands.literal("accept").executes(ctx -> { DiveEntry e = entry(ctx); return e != null && e.accept(ctx.getSource().getPlayerOrException()) ? 1 : 0; }))
+                .then(Commands.literal("leave").executes(ctx -> { DiveEntry e = entry(ctx); return e != null && e.leave(ctx.getSource().getPlayerOrException()) ? 1 : 0; }))
+                .then(Commands.literal("party").executes(ctx -> { DiveEntry e = entry(ctx); if (e == null) return 0; reply(ctx, e.describe(ctx.getSource().getPlayerOrException())); return 1; })));
+
         d.register(Commands.literal("dungeon")
                 .then(Commands.literal("types").executes(ctx -> {
                     com.ascensiondungeons.gen.type.TypeCatalogue.all().forEach(t -> reply(ctx, t.id() + ": 5 rooms, 15 landmarks, arena; " + (t.playable() ? "playable blockout" : "planned")));
@@ -238,6 +249,12 @@ public final class DungeonCommands {
         String left = r.state() == com.ascensiondungeons.run.RunState.ACTIVE
                 ? ", " + Math.max(0, (r.deadline() - now) / 20) + "s left" : "";
         return r.state() + " (" + r.members().size() + " player(s)" + left + ")";
+    }
+
+    private static DiveEntry entry(CommandContext<CommandSourceStack> ctx) {
+        DiveEntry e = DiveEntry.current;
+        if (e == null) ctx.getSource().sendFailure(Component.literal("Dungeons are not available right now."));
+        return e;
     }
 
     /** Turns a player's own dive tutorial on or off, or starts it over. It takes effect from their next dive. */

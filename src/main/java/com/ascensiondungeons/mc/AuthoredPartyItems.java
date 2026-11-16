@@ -10,7 +10,21 @@ import net.minecraft.world.item.ItemStack;
  * Cobblemon implementation of {@link RunLoot.PartyItems}: a party Pokémon's held item is somewhere a player could hide dive loot,
  * so banking and stripping look there too. Only constructed when Cobblemon is installed.
  */
-public final class AuthoredPartyItems implements RunLoot.PartyItems {
+public final class AuthoredPartyItems implements RunLoot.PartyItems, DiveEntry.TeamInfo {
+    @Override
+    public int[] levels(ServerPlayer player) {
+        java.util.List<Integer> out = new java.util.ArrayList<>();
+        for (Pokemon pokemon : Cobblemon.INSTANCE.getStorage().getParty(player)) if (!pokemon.isFainted()) out.add(pokemon.getLevel());
+        return out.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    @Override
+    public int fainted(ServerPlayer player) {
+        int n = 0;
+        for (Pokemon pokemon : Cobblemon.INSTANCE.getStorage().getParty(player)) if (pokemon.isFainted()) n++;
+        return n;
+    }
+
     @Override
     public int each(ServerPlayer player, Function<ItemStack, ItemStack> change) {
         int changed = 0;
