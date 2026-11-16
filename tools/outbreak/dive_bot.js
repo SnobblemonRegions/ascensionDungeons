@@ -2,7 +2,7 @@
 //
 // It loots rarity chests, banks at a checkpoint, uses a curse altar, waits for a timer chest, opens an outbreak chest and a
 // strongbox, checks the first-dive tutorial (welcome, title, Guide bar, guide window, graduation), walks out through the tunnel and down the stairway into the Depths and back up again (its own client physics, no
-// teleport), reads the extraction screen and pays the 35% toll; then it checks a
+// teleport), reads the extraction screen, leaves free on its first extraction and pays the 35% toll on its second; then it checks a
 // knock-out, a walk-out, a disconnect, and beating the gatekeeper.
 //
 // How to run (the bot library cannot parse Cobblemon's packets, so the server runs without Cobblemon and the dungeon uses its
@@ -55,20 +55,47 @@ async function use(bot, x, y, z) {   // right-click a block, standing next to it
 }
 // Walk there on foot, the way a player does: no digging, no building, no teleport. Counts any move the server forced on the bot.
 async function walkTo(bot, x, y, z, range, ms = 150000) {
+  // These checks are about the walk. At twelve times speed the Outbreak is several stages up by now and a spell can throw the
+  // bot into the air as it sets off, so the enemies around it are removed first and a walk that stops short is tried again.
+  let result = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await cmd(bot, '/kill @e[type=!minecraft:player,type=!minecraft:text_display,type=!minecraft:item_display,type=!minecraft:item,distance=..48]', 600);
+    await cmd(bot, '/effect clear @s minecraft:levitation', 300);
+    for (let i = 0; i < 20 && !bot.entity.onGround; i++) await sleep(250);
+    if (attempt > 0) { bot.clearControlStates(); bot.setControlState('back', true); await sleep(400); bot.clearControlStates(); await sleep(300); }   // step back off whatever it was pressed against
+    const one = await walkOnce(bot, x, y, z, range, ms);
+    // The walk is judged on the attempt that gets there; where an earlier attempt stuck is kept and printed.
+    const stuck = (result ? result.stuck : []).concat(one.ok && one.short <= range + 2 ? [] : [`${one.at} after ${one.forced} correction(s)${one.why ? ', ' + one.why : ''}`]);
+    result = { ...one, jump: Math.max(one.jump, result ? result.jump : 0), drop: Math.max(one.drop, result ? result.drop : 0), from: result ? result.from : one.from, tries: attempt + 1, stuck };
+    if (one.ok && one.short <= range + 2) break;
+    result.ok = false;
+  }
+  return result;
+}
+async function walkOnce(bot, x, y, z, range, ms) {
   const mv = new Movements(bot);
   mv.canDig = false; mv.allow1by1towers = false; mv.allowParkour = false; mv.scafoldingBlocks = [];
   bot.pathfinder.setMovements(mv);
   const from = bot.entity.position.clone();
-  let forced = 0, lowest = from.y;
-  const onForced = () => forced++, onMove = () => { lowest = Math.min(lowest, bot.entity.position.y); };
+  // A correction is the server nudging the bot back (a shove from a mob or a spell does that now and then); a jump is how far
+  // one moved it. Being carried somewhere would show as a jump of many blocks.
+  let forced = 0, lowest = from.y, jump = 0, last = from.clone();
+  const onForced = () => { forced++; jump = Math.max(jump, last.distanceTo(bot.entity.position)); last = bot.entity.position.clone(); };
+  const onMove = () => { lowest = Math.min(lowest, bot.entity.position.y); last = bot.entity.position.clone(); };
   bot.on('forcedMove', onForced); bot.on('move', onMove);
-  let why = '';
+  let why = '', walking = true;
   try {
-    await Promise.race([bot.pathfinder.goto(new goals.GoalNear(x, y, z, range)), sleep(ms).then(() => { throw new Error('timed out'); })]);
+    // Give up on this attempt early if the server keeps putting the bot back: it is pressed against something and not getting past.
+    const pushedBack = (async () => { while (walking && forced < 80) await sleep(250); if (walking) throw new Error('kept being put back'); await new Promise(() => {}); })();
+    pushedBack.catch(() => {});
+    bot.once('goal_reached', () => { walking = false; });
+    await Promise.race([bot.pathfinder.goto(new goals.GoalNear(x, y, z, range)), sleep(ms).then(() => { throw new Error('timed out'); }), pushedBack]);
   } catch (e) { why = String(e && e.message || e); try { bot.pathfinder.setGoal(null); } catch (e2) {} }
+  walking = false;
   bot.removeListener('forcedMove', onForced); bot.removeListener('move', onMove);
   const at = bot.entity.position;
-  return { ok: !why, why, forced, from: from.floored().toString(), at: at.floored().toString(), far: Math.round(from.distanceTo(at)), drop: Math.round(from.y - lowest) };
+  const short = Math.round(Math.hypot(at.x - x - 0.5, at.y - y, at.z - z - 0.5) * 10) / 10;       // how far from where it was going
+  return { ok: !why, why, forced, jump: Math.round(jump * 10) / 10, short, from: from.floored().toString(), at: at.floored().toString(), far: Math.round(from.distanceTo(at)), drop: Math.round(from.y - lowest) };
 }
 async function inv(bot) {
   const r = await cmd(bot, '/data get entity @s Inventory', 1200);
@@ -86,7 +113,7 @@ async function tollWindow(bot, portal) {
   await sleep(600);
   let shown = 0; const names = [];
   for (let i = 0; i < 36; i++) { const it = w.slots[i]; if (it) { shown += it.count; names.push(it.count + 'x' + it.name); } }
-  return { window: w, shown, names, title: String(w.title && (w.title.value || w.title)).slice(0, 60), pay: w.slots[45] && w.slots[45].name, fight: w.slots[49] && w.slots[49].name };
+  return { window: w, shown, names, title: (typeof w.title === 'string' ? w.title : JSON.stringify(w.title)).slice(0, 200), pay: w.slots[45] && w.slots[45].name, fight: w.slots[49] && w.slots[49].name };
 }
 async function startRun(bot) {
   await cmd(bot, '/clear', 600);
@@ -99,6 +126,22 @@ async function startRun(bot) {
   return { request: r, describe: d, feats };
 }
 const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); const m = d.match(/stage=(\d+)/); return m ? +m[1] : -1; };
+
+// Click the pay button and wait to be let out. If the haul changed while the screen was open (a stage rising adds a win), the
+// server shows the screen again instead of taking something other than what was shown: confirm that one too.
+async function confirmPay(bot, since) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const n = bot.log.length;
+    try { await bot.clickWindow(45, 0, 0); } catch (e) {}
+    for (let i = 0; i < 20; i++) {
+      await sleep(500);
+      if (bot.log.slice(since).some(l => /Extracted! You leave with/.test(l))) return true;
+      if (bot.log.slice(n).some(l => /Your haul changed while the screen was open/.test(l))) break;
+    }
+    await sleep(800);
+  }
+  return false;
+}
 
 (async () => {
   let bot = await connect();
@@ -119,7 +162,7 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     w = await guideOpened;
     await sleep(500);
     const pages = w ? w.slots.slice(0, 27).filter(Boolean) : [];
-    check('A /dungeon guide opens a window with a page for every lesson', !!w && pages.length === 21 && /Dive guide/.test(String(w.title && (w.title.value || w.title))), w ? pages.length + ' pages' : 'no window');
+    check('A /dungeon guide opens a window with a page for every lesson', !!w && pages.length === 22 && /Dive guide/.test(typeof w.title === 'string' ? w.title : JSON.stringify(w.title)), w ? pages.length + ' pages' : 'no window');
     if (w) { const before = (await inv(bot)).total; try { await bot.clickWindow(0, 0, 0); } catch (e) {} await sleep(300); bot.closeWindow(w); await sleep(400);
       check('A nothing can be taken out of the guide', (await inv(bot)).total === before, before + ' item(s) before and after'); }
     const timer = kinds('TIMER_CHEST')[0];
@@ -164,7 +207,7 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     let nb = bot.bars.length;
     const down = await walkTo(bot, deep[0].x, deep[0].y, deep[0].z, 2);
     check('A the player walks through the tunnel and down the stairway into the Depths, with no teleport',
-      down.ok && down.forced === 0 && down.drop >= 8 && bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)),
+      down.ok && down.forced <= 3 && down.jump < 2 && down.drop >= 8 && bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)),
       JSON.stringify(down));
     const before5 = await inv(bot);
     opened = await use(bot, deep[0].x, deep[0].y, deep[0].z);
@@ -173,17 +216,18 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     check('A a chest down in the Depths gives marked loot', opened && after5.markedTotal > before5.markedTotal, `${deep.length} unopened rarity chests are in the Depths`);
     nb = bot.bars.length;
     const up = await walkTo(bot, mouth.x, mouth.y, mouth.z, 1);
-    check('A the player walks back up the stairway to the entrance room, with no teleport', up.ok && up.forced === 0 && bot.bars.slice(nb).some(b => /climb back/.test(b)), JSON.stringify(up));
+    check('A the player walks back up the stairway to the entrance room, with no teleport', up.ok && up.forced <= 3 && up.jump < 2 && bot.bars.slice(nb).some(b => /climb back/.test(b)), JSON.stringify(up));
     // by now the tutorial has explained what the player met, one lesson at a time, and the Guide bar has moved on to getting out
     const told = bot.log.filter(l => /^Guide: /.test(l)).map(l => l.replace('Guide: ', ''));
     check('A the tutorial explained things as they were met', ['The Outbreak', 'Loot chests', 'Your loot is at risk', 'The Depths'].every(t => told.includes(t)) && new Set(told).size === told.length, told.join(' | '));
     check('A the Guide bar now asks the player to get out', /^Guide: Get back to the extraction portal and leave/.test(guideBar() || ''), guideBar());
-    // extraction: the screen shows exactly what the toll takes; pay it
+    // extraction: the screen shows exactly what the toll would take. This is the player's first extraction, so it is free.
     const portal = kinds('PORTAL')[0];
     const before4 = await inv(bot);
     const toll = await tollWindow(bot, portal);
     const expected = Math.max(1, Math.round(before4.markedTotal * 0.35));
-    check('A the extraction screen shows exactly the 35% toll', !!toll && toll.shown === expected && toll.pay === 'red_concrete' && toll.fight === 'netherite_sword',
+    check('A the extraction screen shows what the 35% toll would take, and offers the first extraction free', !!toll && toll.shown === expected && toll.pay === 'lime_concrete'
+      && toll.fight === 'netherite_sword' && /your first is free/.test(toll.title),
       toll ? `${before4.markedTotal} unbanked item(s): shows ${toll.shown} [${toll.names.join(', ')}], expected ${expected}` : 'no window');
     try { await bot.clickWindow(0, 0, 0); } catch (e) {}          // try to take a shown item: nothing may move
     await sleep(800);
@@ -191,24 +235,45 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     check('A nothing can be taken out of the extraction screen', still.total === before4.total, `${before4.total} item(s) before, ${still.total} after the click`);
     const toll2 = await tollWindow(bot, portal);
     const n5 = bot.log.length;
-    try { await bot.clickWindow(45, 0, 0); } catch (e) {}
-    let extracted = false;
-    for (let i = 0; i < 20 && !extracted; i++) { await sleep(500); extracted = bot.log.slice(n5).some(l => /Extracted! You leave with/.test(l)); }
+    const extracted = await confirmPay(bot, n5);
     await sleep(2000);
     const i4 = await inv(bot);
-    check('A paying the toll takes exactly what was shown and lets the player out', extracted && !!toll2 && i4.total === before4.total - toll2.shown && i4.tagged === 0,
-      `${before4.total} item(s) before, toll showed ${toll2 ? toll2.shown : '?'}, ${i4.total} after, ${i4.tagged} marked | ${bot.log.slice(n5).filter(l => /Toll paid/.test(l))[0] || ''}`);
+    check('A the first extraction is free: nothing shown is taken, and the player is let out', extracted && !!toll2 && toll2.shown > 0 && i4.total === before4.total && i4.tagged === 0
+      && bot.log.slice(n5).some(l => /Your first extraction is free: nothing was taken/.test(l)),
+      `${before4.total} item(s) before, toll showed ${toll2 ? toll2.shown : '?'}, ${i4.total} after, ${i4.tagged} marked`);
     r = await cmd(bot, '/dungeon status');
     check('A the player is out of the run', /not in a dungeon run/.test(r), r);
     // leaving through the portal finishes the tutorial
     r = await cmd(bot, '/dungeon tutorial', 1000);
-    check('A extracting is explained and finishes the tutorial', bot.log.some(l => /Guide: Extracted/.test(l)) && bot.titles.some(t => /Extracted/.test(t)) && /Dive tutorial: finished/.test(r) && /extractions 1/.test(r), r);
+    check('A the free extraction is explained, finishes the tutorial and is used up', bot.log.some(l => /Guide: Extracted/.test(l)) && bot.log.some(l => /Your first extraction was free/.test(l))
+      && bot.titles.some(t => /Extracted/.test(t)) && /Dive tutorial: finished/.test(r) && /extractions 1/.test(r) && /First extraction: used/.test(r), r);
 
-    // ---------------- B: knocked out
+    // ---------------- A2: the second extraction pays the toll
     const nB = bot.log.length;
     run = await startRun(bot);
-    check('B a graduate gets the short briefing and no Guide bar', bot.log.slice(nB).some(l => /Outbreak is building/.test(l)) && !bot.log.slice(nB).some(l => /Guide: Welcome/.test(l))
+    check('A2 a graduate gets the short briefing and no Guide bar', bot.log.slice(nB).some(l => /Outbreak is building/.test(l)) && !bot.log.slice(nB).some(l => /Guide: Welcome/.test(l))
       && !Object.values(bot.boss).some(t => /^Guide: /.test(t)), Object.values(bot.boss).join(' | '));
+    {
+      const cs = run.feats.filter(f => f.kind === 'CHEST');
+      await use(bot, cs[0].x, cs[0].y, cs[0].z);
+      await use(bot, cs[1].x, cs[1].y, cs[1].z);
+      const gate = run.feats.filter(f => f.kind === 'PORTAL')[0];
+      const had = await inv(bot);
+      const due = Math.max(1, Math.round(had.markedTotal * 0.35));
+      const t1 = await tollWindow(bot, gate);
+      check('A2 the second time the screen asks for the toll', !!t1 && t1.shown === due && t1.pay === 'red_concrete' && /fight or pay/.test(t1.title),
+        t1 ? `${had.markedTotal} unbanked item(s): shows ${t1.shown}, expected ${due}, title "${t1.title}"` : 'no window');
+      const nT = bot.log.length;
+      const out = await confirmPay(bot, nT);
+      await sleep(2000);
+      const left = await inv(bot);
+      check('A2 paying the toll takes exactly what was shown and lets the player out', out && !!t1 && left.total === had.total - t1.shown && left.tagged === 0,
+        `${had.total} item(s) before, toll showed ${t1 ? t1.shown : '?'}, ${left.total} after, ${left.tagged} marked | ${bot.log.slice(nT).filter(l => /Toll paid/.test(l))[0] || ''}`);
+      await cmd(bot, '/clear', 600);
+    }
+
+    // ---------------- B: knocked out
+    run = await startRun(bot);
     const c2 = run.feats.filter(f => f.kind === 'CHEST');
     await use(bot, c2[0].x, c2[0].y, c2[0].z);
     const b1 = await inv(bot);
@@ -226,7 +291,8 @@ const stageOf = async bot => { const d = await cmd(bot, '/dungeon dive', 900); c
     const r2 = await cmd(bot, '/dungeon tutorial', 900);
     const r3 = await cmd(bot, '/dungeon tutorial off', 900);
     const r4 = await cmd(bot, '/dungeon tutorial', 900);
-    check('B the tutorial can be started over and switched off', /started over/.test(r) && /Dive tutorial: on/.test(r2) && /Dives 0/.test(r2) && /tutorial off/.test(r3) && /Dive tutorial: off/.test(r4), [r, r2, r3, r4].join(' || '));
+    check('B the tutorial can be started over and switched off, and starting over does not give the free extraction back', /started over/.test(r) && /does not come back/.test(r) && /Dive tutorial: on/.test(r2)
+      && /Dives 0/.test(r2) && /First extraction: used/.test(r2) && /tutorial off/.test(r3) && /Dive tutorial: off/.test(r4), [r, r2, r3, r4].join(' || '));
 
     // ---------------- C: banked loot survives a walk-out, unbanked does not
     run = await startRun(bot);

@@ -32,12 +32,15 @@ final class DiveCoach {
     private final OnboardingStore store;
     private final boolean hasDepths;
     private final int tollPercent;
+    private final boolean firstFree;
     private final Targets targets;
     private final Map<UUID, Onboarding.Coach> coaches = new HashMap<>();
     private final Map<UUID, ServerBossEvent> bars = new HashMap<>();
     private final Map<UUID, String> shown = new HashMap<>();
 
-    DiveCoach(ServerLevel level, boolean hasDepths, int tollPercent, Targets targets) {
+    /** @param firstFree whether this dungeon gives a player their first extraction free */
+    DiveCoach(ServerLevel level, boolean hasDepths, int tollPercent, boolean firstFree, Targets targets) {
+        this.firstFree = firstFree;
         this.level = level;
         this.store = OnboardingStore.of(level.getServer());
         this.hasDepths = hasDepths;
@@ -58,11 +61,15 @@ final class DiveCoach {
 
     void enteredDepths(ServerPlayer p) { coach(p.getUUID()).enteredDepths(); }
 
+    /** Whether the portal lets this player out for nothing: their first extraction, where the dungeon allows it. */
+    boolean firstExtractionFree(ServerPlayer p) { return firstFree && store.progress(p.getUUID()).firstExtractionFree(); }
+
     /** The player is leaving through the portal: they graduate, and are told so at once. */
-    void extracted(ServerPlayer p, boolean paidToll, long now) {
+    void extracted(ServerPlayer p, Onboarding.Exit how, long now) {
         Onboarding.Coach c = coach(p.getUUID());
         c.extracted();
-        tell(p, c.tellNow(paidToll ? Onboarding.Lesson.TOLL_PAID : Onboarding.Lesson.EXTRACTED, now));
+        tell(p, c.tellNow(how.lesson(), now));
+        store.setDirty();
         leave(p);
     }
 
@@ -123,7 +130,7 @@ final class DiveCoach {
         if (lesson == null) return;
         p.sendSystemMessage(Component.literal("Guide: ").withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD)
                 .append(Component.literal(lesson.title()).withStyle(st -> st.withColor(ChatFormatting.YELLOW).withBold(false))));
-        for (String line : lesson.lines(tollPercent)) p.sendSystemMessage(Component.literal("  " + line).withStyle(ChatFormatting.GRAY));
+        for (String line : lesson.lines(tollPercent, firstExtractionFree(p))) p.sendSystemMessage(Component.literal("  " + line).withStyle(ChatFormatting.GRAY));
         if (lesson.weight() == Onboarding.Weight.HEADLINE) {
             p.connection.send(new ClientboundSetTitlesAnimationPacket(10, 70, 20));
             p.connection.send(new ClientboundSetSubtitleTextPacket(Component.literal(lesson.subtitle()).withStyle(ChatFormatting.GRAY)));

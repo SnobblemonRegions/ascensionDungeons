@@ -164,6 +164,12 @@ public final class OutbreakDive {
     private final Set<UUID> greeted = new HashSet<>();
     /** Players who left by paying the toll (as opposed to past the gatekeeper). */
     private final Set<UUID> tolled = new HashSet<>();
+    /** Players who left on their free first extraction. */
+    private final Set<UUID> graced = new HashSet<>();
+    /** Players who left with nothing unbanked. That is not an extraction the tutorial counts: it neither graduates nor uses the free one. */
+    private final Set<UUID> emptyHanded = new HashSet<>();
+    /** Whether a player's first extraction is free here ({@code portal.firstExtractionFree}, on unless set false). */
+    private final boolean firstFree;
     /** The chests each player has taken loot from, so the Guide points at one they have not. */
     private final Map<UUID, Set<BlockPos>> looted = new HashMap<>();
     /** Players who just used the stairway and have not stepped off it yet, so they are not sent straight back. */
@@ -211,6 +217,7 @@ public final class OutbreakDive {
         this.portal = new ExtractionPortal(new ExtractionPortal.Params(ticks(Jx.d(p, "windowSeconds", 30)), Jx.i(p, "growthPercent", 25)));
         this.portalRadius = Jx.d(p, "radius", 2.5);
         this.tollPercent = Math.max(0, Math.min(100, Jx.i(p, "tollPercent", 35)));
+        this.firstFree = Jx.b(p, "firstExtractionFree", true);
         this.baseTier = Math.max(1, Jx.i(host.layout().data().pokemon, "tier", 1));
         for (JsonElement e : Jx.a(cfg, "checkpoints")) checkpoints.add(e.getAsString());
         for (JsonElement e : Jx.a(cfg, "spells")) {
@@ -241,7 +248,7 @@ public final class OutbreakDive {
         }
         if (portalCentre == null) throw new IllegalStateException("no room for an extraction portal");
         for (Feature f : features.values()) f.deep = AuthoredLayout.inDepths(roomOf(Vec3.atBottomCenterOf(f.pos)));
-        coach = new DiveCoach(host.level(), tunnelMouth != null || descentCentre != null, tollPercent, this::guideTarget);
+        coach = new DiveCoach(host.level(), tunnelMouth != null || descentCentre != null, tollPercent, firstFree, this::guideTarget);
         outbreakBar = new ServerBossEvent(Component.literal("Outbreak"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.NOTCHED_6);
         portalBar = new ServerBossEvent(Component.literal("Extraction portal"), BossEvent.BossBarColor.BLUE, BossEvent.BossBarOverlay.PROGRESS);
         portalBar.setProgress(0f);
@@ -293,6 +300,8 @@ public final class OutbreakDive {
     public String guideGoal(UUID player) { return coach.goal(player); }
     /** The toll, as a percentage of unbanked loot. */
     public int tollPercent() { return tollPercent; }
+    /** Whether the portal would let this player out for nothing right now (their first extraction). */
+    public boolean firstExtractionFree(ServerPlayer player) { return coach.firstExtractionFree(player); }
 
     /** Operator aid: bank everyone's haul as a checkpoint would. */
     public void operatorCheckpoint() { if (!closed) checkpoint("Checkpoint (operator)"); }
@@ -601,7 +610,10 @@ public final class OutbreakDive {
             };
             online.sendSystemMessage(Component.literal(text).withStyle(kept ? ChatFormatting.GREEN : ChatFormatting.RED));
             switch (exit) {
-                case EXTRACTED -> coach.extracted(online, tolled.contains(player), now);
+                case EXTRACTED -> {
+                    if (emptyHanded.contains(player)) coach.leave(online);
+                    else coach.extracted(online, graced.contains(player) ? Onboarding.Exit.FREE : tolled.contains(player) ? Onboarding.Exit.TOLL : Onboarding.Exit.GATEKEEPER, now);
+                }
                 case DIED -> coach.knockedOut(online, now);
                 default -> coach.leave(online);
             }
@@ -836,8 +848,14 @@ public final class OutbreakDive {
         }
         int stage = stage();
         String stageName = STAGE_NAMES[Math.min(stage, STAGE_NAMES.length - 1)];
+        boolean grace = coach.firstExtractionFree(p);
         box.setItem(TollMenu.PAY, o.free()
                 ? button(net.minecraft.world.item.Items.LIME_CONCRETE, "Leave now", ChatFormatting.GREEN, "You have nothing unbanked to lose.")
+                : grace ? button(net.minecraft.world.item.Items.LIME_CONCRETE, "Leave free: your first extraction", ChatFormatting.GREEN,
+                        "This once, the toll takes nothing.",
+                        "Next time, leaving this way costs what is shown above:",
+                        o.plan().itemsLost() + " item(s), " + tollPercent + "% of your unbanked loot"
+                                + (o.plan().winsLost() > 0 ? ", and " + o.plan().winsLost() + " of your " + o.unbankedWins() + " unbanked win(s)." : "."))
                 : button(net.minecraft.world.item.Items.RED_CONCRETE, "Pay the toll and leave", ChatFormatting.RED,
                         "You lose the " + o.plan().itemsLost() + " item(s) shown above (" + tollPercent + "% of your unbanked loot)",
                         o.plan().winsLost() > 0 ? "and " + o.plan().winsLost() + " of your " + o.unbankedWins() + " unbanked win(s)." : "and none of your unbanked wins.",
@@ -851,7 +869,7 @@ public final class OutbreakDive {
         box.setItem(TollMenu.STAY, button(net.minecraft.world.item.Items.BARRIER, "Keep exploring", ChatFormatting.WHITE, "Step off the portal and back on to see this again."));
         String fingerprint = o.fingerprint();
         p.openMenu(new net.minecraft.world.SimpleMenuProvider((id, inv, player) -> new TollMenu(id, inv, box, choice -> host.later(1, () -> chosen(p, choice, fingerprint))),
-                Component.literal("Extraction: fight or pay")));
+                Component.literal(grace && !o.free() ? "Extraction: your first is free" : "Extraction: fight or pay")));
     }
 
     private void chosen(ServerPlayer p, int choice, String fingerprint) {
@@ -864,9 +882,27 @@ public final class OutbreakDive {
     /** Takes exactly what the screen showed, then lets the player out. If their loot changed since, they are shown the screen again. */
     private void payToll(ServerPlayer p, String fingerprint) {
         Offer o = offerFor(p);
+        if (!o.free() && coach.firstExtractionFree(p)) {
+            // A player's first extraction costs nothing: no items, no hidden loot, no wins. Nothing is taken, so it does not
+            // matter whether their haul changed while the screen was open.
+            AscensionDungeonsLog.LOG.info("[dive] run {} first extraction of {} is free: toll of {} item(s) waived at stage {}", runId(), p.getGameProfile().getName(),
+                    o.plan().itemsLost(), stage());
+            p.sendSystemMessage(Component.literal("Your first extraction is free: nothing was taken.").withStyle(ChatFormatting.GREEN));
+            graced.add(p.getUUID());
+            extract(p);
+            return;
+        }
         if (!o.fingerprint().equals(fingerprint)) {
-            p.sendSystemMessage(Component.literal("Your loot changed. Look at the toll again before you pay it.").withStyle(ChatFormatting.YELLOW));
+            // Loot was picked up or put away, or a stage rose and added a win: never take anything other than what was shown.
+            p.sendSystemMessage(Component.literal("Your haul changed while the screen was open. Look at the toll again before you pay it.").withStyle(ChatFormatting.YELLOW));
             offer(p);
+            return;
+        }
+        if (o.free()) {
+            // Nothing unbanked, nothing to pay: the player just leaves.
+            emptyHanded.add(p.getUUID());
+            p.sendSystemMessage(Component.literal("You have nothing unbanked to lose: you leave free.").withStyle(ChatFormatting.GREEN));
+            extract(p);
             return;
         }
         var inv = p.getInventory();

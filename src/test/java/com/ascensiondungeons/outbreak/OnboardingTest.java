@@ -190,6 +190,7 @@ class OnboardingTest {
             assertTrue(l.subtitle().length() <= 40, l.name());
             List<String> lines = l.lines(35);
             assertTrue(lines.size() >= 1 && lines.size() <= 3, l.name());
+            assertTrue(l.lines(35, true).size() <= 4, l.name());
             for (String line : lines) {
                 assertFalse(line.contains("{"), l.name() + ": " + line);
                 assertTrue(line.length() <= 200, l.name());
@@ -201,6 +202,56 @@ class OnboardingTest {
         assertTrue(Lesson.PORTAL.lines(35).get(1).contains("35%"));
         assertTrue(Lesson.PORTAL.lines(20).get(1).contains("20%"));
         for (Goal g : Goal.values()) assertTrue(g.text().length() <= 48, g.name());
+    }
+
+    @Test
+    void aPlayersFirstExtractionIsFreeAndOnlyTheFirst() {
+        Progress p = new Progress();
+        assertTrue(p.firstExtractionFree());
+        Coach first = new Coach(p, PACE, true);
+        first.knockedOut();
+        assertTrue(p.firstExtractionFree(), "a knock-out does not use it up");
+        // the portal's lesson says so while it is still to come, and only that lesson
+        assertEquals(Lesson.FIRST_IS_FREE, Lesson.PORTAL.lines(35, true).get(3));
+        assertEquals(3, Lesson.PORTAL.lines(35, false).size());
+        assertEquals(Lesson.CHESTS.lines(35), Lesson.CHESTS.lines(35, true));
+        Coach second = new Coach(p, PACE, true);
+        second.extracted();
+        assertFalse(p.firstExtractionFree());
+        assertTrue(p.graduated() && p.everExtracted());
+        // each way out has its own words
+        assertEquals(Lesson.FIRST_EXTRACTION, Onboarding.Exit.FREE.lesson());
+        assertEquals(Lesson.TOLL_PAID, Onboarding.Exit.TOLL.lesson());
+        assertEquals(Lesson.EXTRACTED, Onboarding.Exit.GATEKEEPER.lesson());
+        assertTrue(Lesson.FIRST_EXTRACTION.lines(35).get(1).contains("35%"));
+    }
+
+    @Test
+    void startingTheTutorialOverDoesNotGiveTheFreeExtractionBack() {
+        Progress p = new Progress();
+        new Coach(p, PACE, true).extracted();
+        p.reset();
+        assertTrue(p.rookie(), "taught from the beginning again");
+        assertEquals(0, p.extractions());
+        assertFalse(p.firstExtractionFree(), "but the toll is the toll");
+        // it is not tied to coaching either: a player who turned the tutorial off still has theirs
+        Progress quiet = new Progress();
+        quiet.setOff(true);
+        assertTrue(quiet.firstExtractionFree());
+        // saved and read back, and progress saved before this existed counts anyone who had extracted as having had theirs
+        Progress back = new Progress(p.seenBits(), p.dives(), p.extractions(), p.knockOuts(), p.off(), p.everExtracted());
+        assertFalse(back.firstExtractionFree());
+        assertFalse(new Progress(0, 3, 1, 0, false).firstExtractionFree());
+        assertTrue(new Progress(0, 3, 0, 2, false).firstExtractionFree());
+    }
+
+    @Test
+    void lessonsKeepTheirPlacesBecauseWhatWasHeardIsSavedByPosition() {
+        // A new lesson goes at the end. If this fails, saved progress would point at the wrong lessons.
+        String[] order = {"WELCOME", "OUTBREAK", "ENEMIES", "SPELLS", "CHESTS", "UNBANKED", "CHECKPOINT", "STAGE", "TUNNEL", "DEPTHS", "TIMER_CHEST", "OUTBREAK_CHEST",
+                "STRONGBOX", "ALTAR", "LOW_HEALTH", "TIME_SHORT", "PORTAL", "GATEKEEPER", "KNOCKED_OUT", "TOLL_PAID", "EXTRACTED", "FIRST_EXTRACTION"};
+        assertTrue(Lesson.values().length >= order.length);
+        for (int i = 0; i < order.length; i++) assertEquals(order[i], Lesson.values()[i].name(), "position " + i);
     }
 
     @Test

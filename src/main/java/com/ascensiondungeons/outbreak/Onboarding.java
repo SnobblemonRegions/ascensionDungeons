@@ -21,7 +21,8 @@ public final class Onboarding {
 
     /**
      * One thing a player is taught, with the words. {@code {toll}} in a line is replaced by the toll's percentage.
-     * The order here is the order of the guide book.
+     * The order here is the order of the guide book. What a player has heard is saved by position, so a new lesson goes at
+     * the end and none is ever removed or moved.
      */
     public enum Lesson {
         WELCOME(Weight.HEADLINE, false, "Welcome to your first dive",
@@ -87,7 +88,14 @@ public final class Onboarding {
                 "That is the whole loop: loot, go deeper, bank, get out. /dungeon guide keeps these notes."),
         EXTRACTED(Weight.HEADLINE, true, "Extracted",
                 "You left with everything you carried.",
+                "That is the whole loop: loot, go deeper, bank, get out. /dungeon guide keeps these notes."),
+        FIRST_EXTRACTION(Weight.HEADLINE, true, "Extracted",
+                "Your first extraction was free: this once, the toll took nothing.",
+                "From now on, leaving costs {toll}% of your unbanked loot unless you beat the gatekeeper. Leave before it outgrows you.",
                 "That is the whole loop: loot, go deeper, bank, get out. /dungeon guide keeps these notes.");
+
+        /** Added to the portal's lesson for a player whose first extraction is still to come. */
+        public static final String FIRST_IS_FREE = "Your first extraction is free: this once, the toll takes nothing.";
 
         private final Weight weight;
         private final boolean urgent;
@@ -114,13 +122,18 @@ public final class Onboarding {
                 case KNOCKED_OUT -> "Your unbanked loot is lost";
                 case TOLL_PAID -> "You paid the toll and kept the rest";
                 case EXTRACTED -> "You kept everything";
+                case FIRST_EXTRACTION -> "Your first extraction is free";
                 default -> "";
             };
         }
 
-        public List<String> lines(int tollPercent) {
-            List<String> out = new ArrayList<>(lines.size());
+        public List<String> lines(int tollPercent) { return lines(tollPercent, false); }
+
+        /** @param firstFree the player's first extraction is free and still to come: the portal's lesson says so */
+        public List<String> lines(int tollPercent, boolean firstFree) {
+            List<String> out = new ArrayList<>(lines.size() + 1);
             for (String line : lines) out.add(line.replace("{toll}", Integer.toString(tollPercent)));
+            if (firstFree && this == PORTAL) out.add(FIRST_IS_FREE);
             return out;
         }
 
@@ -139,21 +152,49 @@ public final class Onboarding {
         public String text() { return text; }
     }
 
+    /** How a player left through the portal. */
+    public enum Exit {
+        /** Their first extraction, which costs nothing. */
+        FREE,
+        /** They paid the toll. */
+        TOLL,
+        /** The gatekeeper was beaten and the portal stood open. */
+        GATEKEEPER;
+
+        /** The lesson that explains leaving this way. */
+        public Lesson lesson() { return this == FREE ? Lesson.FIRST_EXTRACTION : this == TOLL ? Lesson.TOLL_PAID : Lesson.EXTRACTED; }
+    }
+
     /** What is remembered about one player between dives. */
     public static final class Progress {
         private long seen;
         private int dives, extractions, knockOuts;
         private boolean off;
+        /** The player has left through the portal at some time. Starting the tutorial over does not forget this. */
+        private boolean everExtracted;
 
         public Progress() {}
 
-        public Progress(long seen, int dives, int extractions, int knockOuts, boolean off) {
+        /** For progress saved before the free first extraction existed: anyone who had extracted has had theirs. */
+        public Progress(long seen, int dives, int extractions, int knockOuts, boolean off) { this(seen, dives, extractions, knockOuts, off, extractions > 0); }
+
+        public Progress(long seen, int dives, int extractions, int knockOuts, boolean off, boolean everExtracted) {
             this.seen = seen;
             this.dives = dives;
             this.extractions = extractions;
             this.knockOuts = knockOuts;
             this.off = off;
+            this.everExtracted = everExtracted || extractions > 0;
         }
+
+        public boolean everExtracted() { return everExtracted; }
+        /**
+         * A player's first extraction is free. It is theirs until they leave through the portal by any means, whether or not
+         * they want coaching, and starting the tutorial over does not give it back.
+         */
+        public boolean firstExtractionFree() { return !everExtracted; }
+        /** Operator aid: this player has had their free extraction. */
+        public void forfeitFirstExtraction() { everExtracted = true; }
 
         public long seenBits() { return seen; }
         public int dives() { return dives; }
@@ -174,7 +215,7 @@ public final class Onboarding {
         public void reset() { seen = 0; dives = 0; extractions = 0; knockOuts = 0; off = false; }
         void markSeen(Lesson lesson) { seen |= lesson.bit(); }
         void startedDive() { dives++; }
-        void extracted() { extractions++; }
+        void extracted() { extractions++; everExtracted = true; }
         void knockedOut() { knockOuts++; }
     }
 
@@ -267,7 +308,7 @@ public final class Onboarding {
             if (goal == Goal.DESCEND) { goal = Goal.DEEP_LOOT; changed = true; }
         }
 
-        /** The player left through the portal, by the toll or past the gatekeeper. They graduate. */
+        /** The player left through the portal: free the first time, by the toll, or past the gatekeeper. They graduate. */
         public void extracted() { progress.extracted(); goal = null; changed = true; }
 
         public void knockedOut() { progress.knockedOut(); changed = true; }

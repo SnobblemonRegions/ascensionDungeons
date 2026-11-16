@@ -87,6 +87,9 @@ _Avoid_: quest, objective, mission.
 **Graduate**: A player who has left through the portal at least once. They have no Guide bar.
 _Avoid_: veteran in code (it says nothing about how).
 
+**Free first extraction**: A player's first extraction with unbanked loot costs nothing. One per player, never given back.
+_Avoid_: grace, mercy, free dive (a knock-out in a first dive is not softened).
+
 **Dive guide**: The window `/dungeon guide` opens: every lesson as an item to read.
 
 ## Enemies
