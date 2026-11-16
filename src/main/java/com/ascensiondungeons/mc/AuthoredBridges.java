@@ -20,6 +20,9 @@ public final class AuthoredBridges {
     /** Places a wild Pokemon (Cobblemon) as the dungeon's creature. Returns null if it could not be placed. */
     public interface PokemonSpawner {
         Mob spawn(ServerLevel level, String species, int pokemonLevel, BlockPos at, float yaw);
+
+        /** Marks a spawned creature as a dungeon enemy: it cannot be caught or drawn into a turn-based battle. */
+        default void hostile(Mob creature) { }
     }
 
     /** Real-time combat between dungeon Pokemon, players and the players' own Pokemon. */

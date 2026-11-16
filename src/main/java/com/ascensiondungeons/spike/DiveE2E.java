@@ -163,14 +163,14 @@ public final class DiveE2E {
             return server.getPlayerList().getPlayer(ID) == bot;
         }));
         addRun(manager, "run 1");
-        steps.add(new Step("a wave spawns" + (cobblemon ? " and its enemies are Pokémon from the water pools" : ""), 1200, () -> {
+        steps.add(new Step("a wave spawns" + (cobblemon ? " and its enemies are uncatchable, unbattleable Pokémon from the water pools" : ""), 1200, () -> {
             List<Mob> mobs = dive().enemyMobs();
             if (mobs.isEmpty()) return false;
             List<String> names = new ArrayList<>();
             boolean allPokemon = true;
             for (Mob m : mobs) { names.add(m.getName().getString()); allPokemon &= m.getClass().getName().contains("PokemonEntity"); }
             AscensionDungeonsLog.LOG.info("DIVE-E2E enemies: {} ({})", names, mobs.get(0).getClass().getSimpleName());
-            return !cobblemon || allPokemon;
+            return !cobblemon || (allPokemon && Party.areEnemies(mobs));
         }));
         steps.add(new Step("an enemy reaches the player and hurts them (combat and targeting work)", 2400, () -> {
             if (bot.getHealth() < bot.getMaxHealth()) { AscensionDungeonsLog.LOG.info("DIVE-E2E player health {} of {}", bot.getHealth(), bot.getMaxHealth()); return true; }
@@ -286,6 +286,19 @@ public final class DiveE2E {
 
     /** Cobblemon calls, kept in their own class so it only loads when Cobblemon is present. */
     private static final class Party {
+        /** Dive enemies cannot be caught or pulled into a turn-based battle. */
+        static boolean areEnemies(List<Mob> mobs) {
+            for (Mob m : mobs) {
+                var e = (com.cobblemon.mod.common.entity.pokemon.PokemonEntity) m;
+                boolean unbattleable = e.getEntityData().get(com.cobblemon.mod.common.entity.pokemon.PokemonEntity.getUNBATTLEABLE());
+                if (!e.isUncatchable() || !unbattleable || e.canBattle(bot)) {
+                    AscensionDungeonsLog.LOG.error("DIVE-E2E {} uncatchable={} unbattleable={} canBattle={}", m.getName().getString(), e.isUncatchable(), unbattleable, e.canBattle(bot));
+                    return false;
+                }
+            }
+            return true;
+        }
+
         static boolean hide(ServerPlayer player) {
             var party = com.cobblemon.mod.common.Cobblemon.INSTANCE.getStorage().getParty(player);
             var first = com.cobblemon.mod.common.api.pokemon.PokemonProperties.Companion.parse("magikarp level=5").create();

@@ -16,6 +16,18 @@ public final class AuthoredPokemon implements AuthoredBridges.PokemonSpawner {
         @Override public boolean shouldDespawn(PokemonEntity entity) { return false; }
     };
 
+    /** Outbreak enemies fight in real time and are not a way to collect Pokémon. */
+    @Override
+    public void hostile(Mob creature) {
+        if (!(creature instanceof PokemonEntity entity)) return;
+        try {
+            PokemonProperties.Companion.parse("uncatchable=true").apply(entity);
+            entity.getEntityData().set(PokemonEntity.getUNBATTLEABLE(), true);
+        } catch (RuntimeException e) {
+            AscensionDungeonsLog.LOG.warn("Could not mark {} as a dungeon enemy", creature.getName().getString(), e);
+        }
+    }
+
     @Override
     public Mob spawn(ServerLevel level, String species, int pokemonLevel, BlockPos at, float yaw) {
         try {

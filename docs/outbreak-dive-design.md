@@ -1,191 +1,158 @@
 # Outbreak dives: a push-or-extract loop for authored dungeons
 
-Status: **design plus a tested pure core, nothing wired in, nothing seen in a live run.** Every number is provisional.
-Decisions (owner, 2026-11-15): loss is **haul-only**; the timed escalation is called the **Outbreak**; the first dungeon is **water**
-(Cinderforge is outdated and is not part of this).
-Later the same day: **Lootr is required** for Outbreak dives (no plain-chest fallback); a failed exit **strips tagged loot** from the
-inventory, armour, offhand and party held items, and anything already consumed or converted is the player's to keep; loot chests get
-**our own models, one design per rarity**; dungeon mobs are **enemy Cobblemon** with spells and aggro styles, and the dungeon's type
-decides the spawn pool.
+Status (2026-11-16): **built and playable in the water dungeon; checked by unit tests, a protocol bot and a headless harness with
+Cobblemon loaded. Not yet seen by a person in a real client, not tried with more than one player, and never run against a live
+AscensionLib.** Every number is provisional. Vocabulary is in `CONTEXT.md`.
+
+Owner decisions (2026-11-15): loss is **haul-only**; the timed escalation is the **Outbreak**; **water** first (Cinderforge is
+outdated and untouched); **Lootr is required**; a failed exit **strips marked loot** from inventory, armour, offhand and party held
+items, and anything already consumed or converted stays; loot chests get **our own models, one per rarity**; dungeon mobs are
+**enemy Cobblemon** with spells and aggro styles, and the dungeon's type decides the pool. After that the owner handed over design
+authority; the calls made under it are listed in "Design calls" below so they are easy to overrule.
 
 ## Why
 
-Authored dungeons pay once, on a win at the end (`AuthoredDirector.settleRewards` fires when the completion boss dies). There is no
-decision in the middle of a run. This adds the loop that makes an extraction dungeon fun: the longer you stay the worse it gets and
-the more it pays, and you choose when to leave. The idea is borrowed from Runebind's design (escalating difficulty, timed chests,
-a charged exit portal); names, lore and assets are not.
-
-## Vocabulary (add to a `CONTEXT.md` when this repo gets one)
-
-| Term | Meaning | Not |
-|---|---|---|
-| **Threat** | The band chosen at the door (AscensionLib `threat_1..7`, Towers 0-VII). Already exists. | the time-driven rise |
-| **Outbreak** | How worked-up a dungeon is, rising with time spent and with curses taken. Stage `0..maxStage`. Drives spawn pressure, elite chance and zone tier. Pokémon's *Mass Outbreak*: wild spawns surge. | Threat, the run deadline |
-| **Haul** | What a player has earned in a run and not yet secured: arena wins, chests, the boss. | wallet materials, which are paid once at settlement |
-| **Checkpoint** | A moment that **banks** the player's haul. | a respawn point |
-| **Extraction** | Leaving through the portal with the whole haul. The portal is charged by kills, opens for a short window, and needs more charge each time it is missed. | `/dungeon leave` |
+An authored dungeon used to pay once, on a win at the end, with no decision in the middle. An Outbreak dive adds the loop that makes
+an extraction dungeon fun: the longer the party stays, the worse it gets and the more it carries, and the party chooses when to
+leave. The idea is borrowed from Runebind's design (escalating difficulty, timed chests, a charged exit portal); names, lore and
+art are not.
 
 ## The loop
 
-Enter at a Threat band -> the Outbreak rises -> haul accumulates (unbanked) -> bank at checkpoints, **or** extract -> one AscensionLib
-settlement per player -> a death, timeout or walk-out pays **only what was banked**. Pokémon, gear and the wallet are never at risk
-(AscensionLib: reward, never remove).
+Enter -> the Outbreak rises -> haul accumulates, unbanked -> bank at checkpoints, or extract through the portal -> one AscensionLib
+settlement per player -> a knock-out, timeout, walk-out or disconnect pays **only what was banked**. Pokémon, gear and the wallet
+are never at risk (AscensionLib: reward, never remove). Pay follows difficulty reached, not loitering: the Outbreak raises the zone
+tier and the payout uses the tier reached; the daily budget and the no-Cores rule for dungeons are AscensionLib's and still apply.
 
-Pay follows difficulty, not loitering: the Outbreak raises the zone tier and spawn pressure, and the payout tier is the highest zone
-tier reached. The daily full-reward budget and the rule that dungeons never pay Ascension Cores still apply.
+## What a player meets (water, `/dungeon type water`)
 
-## What is built (`com.ascensiondungeons.outbreak`, Minecraft-free, 23 tests)
+- **Outbreak bar.** Stage 0 to 5: Calm, Restless, Agitated, Swarming, Rampage, Mass Outbreak. One stage per 3 minutes. Each stage
+  survived adds one win to everyone's haul and is announced. The zone tier rises one per two stages (3, 4, 4, 5, 5 for water).
+- **Waves.** Every 40 s (faster at higher stages) enemies arrive in the room the party is in: 2 at stage 0, +1 per stage, +1 per
+  extra player, never more than 14 alive. Enemies the whole party has left 56 blocks behind are let go.
+- **Enemies.** With Cobblemon: Pokémon from the dungeon's pools (`wild_low`, then `wild_mid`), fighting in real time, uncatchable
+  and not battleable turn-based. Without it: the vanilla mob the spawn names. Each spawn has an **aggro style** (below). Elites
+  (6 percent per stage, at most 30) glow, have double health, hit 1.4 times as hard and cast a spell.
+- **Spells.** A cyan ring on the ground, then the hit; leave the ring to dodge. Water has Whirlpool (pulls in), Water Spout
+  (throws up) and Bubble Beam (slows). Killing the caster cancels the cast.
+- **Chests**, placed fresh each run from its seed, on open ground away from mechanics, hazards and the boss room:
+  rarity chests (Common to Epic, 5), outbreak chests (2; their rarity grows one step per two stages until opened), a timer chest
+  (sealed until stage 2, then free) and a strongbox (Epic; opening it sends six guardians). Each has a coloured label, rarity
+  sparkles, a rarity floor block, its own loot table (`chests/rarity/*`) and, with the pack, its own model.
+- **Curse altars** (2). Touch one: the Outbreak jumps two minutes ahead and everyone's haul gains a win.
+- **Checkpoints.** Finishing `sluice`, `pearl_trial` or `offering` banks everyone's haul. The trial is also a win.
+- **Extraction portal**, a few blocks from the entrance. Kills within 24 blocks charge it (an elite counts three, ten needed). Full, it
+  opens for 20 s; step on it to leave with everything. Missed, it closes and needs 50 percent more.
+- **Leaving.** Extracted: keep everything. Boss defeated: everyone inside keeps everything. Knocked out, out of time, `/dungeon leave`
+  or disconnected: keep what was banked. **Nobody dies in a dive:** a lethal hit heals the player, takes the unbanked haul and sends
+  them home.
+
+## How it is built
+
+Pure logic, Minecraft-free, in `com.ascensiondungeons.outbreak` (unit tested):
 
 | Class | Job |
 |---|---|
-| `OutbreakClock` | ticks since start plus curse penalties -> stage; spawn scale, elite chance, zone tier per stage; `pollNewStage` for announcements. Nothing ever lowers it. |
-| `Haul` | per-player ledger of `ARENA_WIN`, `CHEST`, `BOSS`; `bank`; `settle(player, Exit)` returns what to pay (extracted keeps all, died/timed out/left keeps banked only). |
-| `ExtractionPortal` | `CHARGING -> OPEN -> CHARGING`, kills charge it, a window of `windowTicks`, `growthPercent` more charge after each miss. |
+| `OutbreakClock` | time + curse penalties -> stage, progress, spawn scale, elite chance, zone tier. Nothing lowers it. |
+| `Haul` | per-player ledger of wins, chests, the boss; `bank`; what each way of leaving keeps. |
+| `ExtractionPortal` | charging -> open -> charging, a window, growing cost. |
+| `WavePlanner` | how many enemies a wave adds. |
+| `FeaturePlanner` | where a run's chests, altars and portal go, from the seed, with spacing rules. |
+| `ChestRarity`, `ChestLook` | the rarity ladder, colours, loot tables, and which pack model a chest shows. |
+| `DiveSettlement` | groups players into the fewest `settleDungeonRun` calls. |
+| `Aggro` | the six styles: who an enemy attacks, when it goes home. |
+| `Spell`, `Spell.Cast` | a telegraphed attack and its timing. |
 
-## Mapping to the existing AscensionLib contract (no change needed for v1)
+Thin game layer in `com.ascensiondungeons.mc`:
 
-`settleDungeonRun(runId, "VICTORY", tier, arenaWins, bossDefeated, players)` already pays by `arenaWins` and `bossDefeated`, and the
-dungeon decides what counts as a victory. So per player: `Haul.settle(...)` gives `arenaWins` and `bossDefeated`; `tier` is the highest
-`OutbreakClock.Params.zoneTier(baseTier, stage)` reached. Group players by their settlement and call once per distinct outcome
-(arena wins is a run-wide argument today, so players with different banked wins need separate calls or a contract addition: open question 3).
-`Haul.Settlement.chests` has **no wallet payout** in the contract; it only decides physical chest loot (open question 1).
+- `OutbreakDive`: one per run; boss bars, waves, spells' particles and hits, chest and altar behaviour, the portal, settlement. It
+  applies decisions from the pure classes and makes none of its own.
+- `AuthoredDirector.Session` creates the dive when the dungeon has an `outbreak.json` and hands it the session's events.
+- `AuthoredChunkGenerator` places the feature blocks; `AuthoredLayout.features(seed)` is the shared, pure plan.
+- `RunLoot` + `lootr/RunLootFilters`: marks chest loot at the source (Lootr's fill hook), clears or strips it, sweeps at login.
+  `AuthoredPartyItems` extends that to party held items when Cobblemon is installed.
+- `AuthoredCombat` asks a `Targeting` hook for each hostile's target, so aggro styles apply to dungeon Pokémon.
+- `AuthoredEvents`: the knock-out (`ALLOW_DEATH`), the login sweep, and chest/altar clicks.
 
-## Water (`dungeons/water`, base tier 3)
+A dungeon becomes an Outbreak dive by adding `dungeons/<id>/outbreak.json` (clock, portal, waves, elite, guardians, checkpoints,
+features, spells). The dungeon kit does not write that file, so regenerating `layout.json` leaves it alone. The other sixteen
+dungeons have none and behave as before.
 
-Facts from `layout.json`: biome lukewarm ocean, six rooms, mechanics include a tide canal, a three-lever sluice, `trial` mechanics that
-today count as arena wins, a boss (`tide_warden`) whose death ends the run after `completion.delaySeconds` (45), chests of kind `loot`
-(table `ascensiondungeons:chests/flooded_ruins`, Lootr when installed).
+## Aggro styles
 
-Proposed, not yet checked against play:
-- **Checkpoints:** each completed `trial`, and opening the Archive (Court) lock.
-- **Outbreak effects:** the existing `encounters` and the Pokémon pools (`wild_low` and up) scale by `spawnScale`; elites replace some spawns;
-  the zone tier rises by one per two stages (`zoneTier`).
-- **Curses:** an offering-style altar that adds penalty ticks in exchange for a larger haul entry.
-- **Extraction portal:** in the Reservoir Grotto entry room, charged by kills anywhere, so it is reachable from the start.
-- **Timer chests and strongboxes:** a chest marker with an unlock stage; a strongbox that spawns a wave when opened.
+| Style | Behaviour |
+|---|---|
+| Hunter | chases the nearest target in sight (26 blocks) |
+| Sentry | fights whatever comes within 10 blocks of its post, then walks back |
+| Guardian | fights within 6 blocks of its spot and never leaves it |
+| Ambusher | still until someone comes within 5 blocks or hits it, then hunts |
+| Skirmisher | fights from range (asks to stay 8 blocks away) |
+| Pack | ignores distant targets until it or a packmate is provoked; then the pack wakes |
 
-## Open questions and spikes (do these before wiring)
+For Pokémon the decision is exact (real-time combat asks the dive). For vanilla fallback mobs it is approximated by steering their
+own AI (follow range, a frozen state for sleeping ambushers and packs).
 
-1. **Chest loot is physical: spiked 2026-11-15, the tagging half works.** See "Lootr spike" below. Still open: stripping unbanked
-   items on a failed exit, clearing the tag on bank or extraction, the no-Lootr fallback, and the smuggling routes listed there.
-2. **Mid-run tier change.** The contract says `openZone` can change a zone's tier; confirm in a live run that wild ratings follow, and that
-   rarity stops improving at tier 4 (so spawn pressure, not rarity, carries stages 4 and up).
-3. **Per-player arena wins.** If banked wins differ per player, `settleDungeonRun` needs one call per distinct value, or a new method that
-   takes per-player wins (add a method; never change the existing one).
-4. **Dependence on the reconstructed `run` package.** `RunManager`, `RunHost` and friends were rebuilt from call sites, not recovered.
-   Reconcile with the original before wiring anything into the run lifecycle.
-5. **No client mod:** show the Outbreak stage and portal charge with a boss bar or sidebar; no resource pack.
+## Chest models
 
-## Build order
+`tools/outbreak/make_chest_pack.py resourcepack [preview.png]` draws eleven original models procedurally and writes `resourcepack/`;
+`docs/outbreak-chests-preview.png` is its own preview. Common is a plank chest with iron straps; Uncommon adds cyan caps and a gem
+latch; Rare is blue steel with a stepped lid and gold; Epic is violet and gold with pillars and crystals; the timer chest is gold
+with a clock dial, chained while sealed; the strongbox is a squat safe with a red eye; the outbreak chest is stone with growths in
+the colour of the rarity it has reached, more of them the higher it is. Colours follow AscensionLib's `rarity-colors.json`.
 
-1. (done) pure core and tests.
-2. Spike open question 1, then 2.
-3. Wire one dungeon: `OutbreakClock` + announcements in `AuthoredDirector`, then `Haul` at the existing settlement point, then the portal.
-4. A bot test (the headless pattern from the earlier session) for enter, outbreak stages, extraction and a failed exit.
-5. A real-client playtest, which nothing here replaces.
+In the world a model is an `item_display` of `minecraft:popped_chorus_fruit` with a custom-model number (`ChestLook`), sitting over
+the real Lootr chest. It is **off by default** (`features.models` in `outbreak.json`): a player without the pack would see a floating
+chorus fruit. Turn it on once the pack is in the server's resource pack. Without it a chest is told apart by its label, its
+sparkles and its floor block, so nothing depends on the pack.
 
-## Lootr spike (2026-11-15): run loot can be tagged at the source
+## Verification
 
-**Result: proven on a live dev server.** A bot player opened two Lootr chests placed with `/dungeon chest`. The one in the overworld gave
-8 untagged items. The one inside a `water` run gave 7 items, every one carrying `custom_data {ascension_run: "<run id>"}`, and the server
-logged `[run-loot] tagged 7 stack(s) for RunBot in run <id>`. Run without Cobblemon (the bot library cannot parse its packets), with the
-vanilla `simple_dungeon` table, so the dungeon's own tables and a real client are still untested.
-
-How it works (read from Lootr 1.11.38.127 with `javap`, signatures and bytecode, not decompiled source):
-- `ILootrFilter.mutate(ObjectArrayList<ItemStack>, LootFiller.LootFillerState, LootContext, RandomSource)` is called for every registered
-  filter from Lootr's `MixinLootTable`, injected into `LootTable.fill` just before `shuffleAndSplitItems`. Returning `true` stops later filters.
-- It runs for **every** `fill`, and the state is null unless Lootr is doing a per-player roll, so the filter must null-check.
-- The state gives `player()` and `provider().getInfoDimension()` / `getInfoPos()`: enough to find the run.
-- Filters are discovered with `ServiceLoader` (`LootrServiceRegistry`), so registration is a
-  `META-INF/services/noobanidus.mods.lootr.common.api.filter.ILootrFilterProvider` file. The class is only loaded when Lootr is, so Lootr stays optional.
-
-Built (off unless `-Dascensiondungeons.runLootTag=true`, because nothing clears the tag yet):
-- `mc/RunLoot`: `tag`, `runOf(stack)`, `clear`, and a dimension-to-run lookup set while the server runs.
-- `mc/lootr/RunLootFilters`: the filter, with a fault barrier so a bug can never break chest loot.
-- `FantasyRunHost.runOfDimension`.
-
-Consequences to design around:
-- A tagged stack does not merge with an untagged one, or with one from another run. Banking and extraction must `clear` the tag.
-- **Smuggling routes** a strip-on-failure must cover or accept: a tagged item held by a Pokémon, inside a bundle or shulker box, dropped
-  for a teammate who extracts, crafted or smelted into something untagged, or eaten/used. Simplest rule: a failed exit removes tagged
-  stacks from the inventory, armour, offhand and party held items; anything consumed or converted is the player's to keep.
-- **Without Lootr** the dungeon places plain shared chests and this hook does not exist. Either require Lootr for Outbreak dives or add a
-  second tagging point (to be checked against Fabric API 0.116.6: whether a loot-drops event exists there).
-- Mob drops and Pokémon captures are not chest loot and are untouched by this.
-
-## Loot chest skins: our own models, one design per rarity (owner direction 2026-11-15, nothing built)
-
-Loot chests inside a dungeon should not look like plain chests. Each rarity gets its own model, so a player reads a chest's worth from
-across the room, and the special chests are recognisable at a glance.
-
-| Chest | Reads as | Notes |
+| What | How | Result |
 |---|---|---|
-| Common, Uncommon, Rare, Epic | the four loot tiers that already exist (`loot_table/tiers/common` .. `epic`) | Colour them from AscensionLib's `design/rarity-colors.json` (slate, cyan, blue, violet) so rarity means the same colour everywhere. Legendary gold and Mythic crimson are there if higher tiers are added. |
-| Outbreak chest | loot that improves the longer the party stays | Should visibly change as it upgrades (more glow, a higher-rarity trim). |
-| Timer chest | locked until a stage or time is reached | Needs a locked and an unlocked look. |
-| Strongbox | high value, opening it summons a wave | Should look dangerous. |
+| Rules | `./gradlew test`: 177 tests, 64 of them for the outbreak package and the water data (200 seeds of feature placement on the real layout) | pass |
+| A full dive without Cobblemon | `tools/outbreak/dive_bot.js`: a protocol bot on a dev server: marking, banking, altar, timer chest, outbreak chest, strongbox, portal extraction, knock-out, walk-out, disconnect and login sweep | 19/19 on the final code |
+| A dive with the whole mod set | `DUNGEONSPIKE_DIVE=1 ./gradlew runServer` (`spike/DiveE2E`): a stand-in player joins through the normal login path and is driven from code | 17/17: wave enemies are uncatchable, unbattleable Pokémon from the water pools; they hunt and hurt the player; rarity tables roll Cobblemon items; checkpoint, knock-out and extraction behave; loot hidden as a party held item is banked or stripped; also 17/17 with model displays on |
+| Chest pack | `ChestLookTest`: ids in the pack match the code, every model and texture exists | pass |
 
-Rules the art must respect:
-- **No client mod of ours.** Players join with Cobblemon (and the pack's other client mods); this mod stays server-side. The models ship in a
-  resource pack. Towers and Raids already build and auto-host one through Polymer, and AscensionLib has a hand-made `resourcepack/`.
-- **Works without the pack.** A player who declines it must still see a usable chest (the plain one), as Towers does for armour.
-- Models are original work (Blockbench or similar); nothing copied from Runebind or other servers.
+Use `-Dascensiondungeons.outbreakSpeed=6` for both live checks or they take many minutes.
 
-How it could be drawn (decide before any art is commissioned):
+**Not verified.** How any of it looks and feels in a real client. More than one player (shared banking, a second player opening an
+outbreak chest after it grew, party-size scaling). A live AscensionLib: its jar cannot be built here (it needs a local
+`webgui-dev.jar`), so the per-player `settleDungeonRun` calls and mid-run `openZone` tier changes are covered only by unit tests of
+the grouping and by log lines. The boss flow inside a dive. Spells against Pokémon-owned targets. Performance at stage 5 with four
+players. Balance.
 
-| Option | How | Cost and risk |
-|---|---|---|
-| **A. Display entity over the chest (recommended to try first)** | Keep the Lootr chest as the real container; show an `item_display` with a custom model per rarity on top of it, and hide or shrink the chest's own look. | Server-side only. Needs a pack entry per model. Lid animation and the per-player "already opened" look are extra work. Polymer's virtual entities would make it per-player; that is a **new dependency for this mod** and needs approval. |
-| B. Lootr's own texture types | Lootr has client texture types and pluggable `ILootrType`s. | Needs code on the client, which this mod does not have. Only if the client pack is allowed to grow. |
-| C. A Polymer block per rarity | Real custom blocks, mapped by Polymer. | Largest change: the chest stops being a Lootr chest, so per-player loot and the tagging filter would need redoing. |
+## Design calls made under delegated authority (overrule freely)
 
-Open: (1) who makes the models, and how many states each needs; (2) whether Polymer may be added here; (3) **is Lootr in the players'
-client pack?** Lootr registers its own blocks, so a client without it may not be able to join a server that has it. This affects the
-"Lootr is required" decision and must be confirmed against the real modpack before relying on it.
+1. **Nobody dies in a dive.** A lethal hit is a knock-out. It is what makes haul-only loss true: a real death would drop the player's own gear.
+2. **What earns haul:** each Outbreak stage survived, each trial, each curse altar, the boss. Chests are counted and reported but are their own reward (the items).
+3. **Checkpoints bank, they do not heal or save position.** Water's are `sluice`, `pearl_trial` and `offering`.
+4. **The portal charges only from kills near it**, so extracting means holding the exit, and a party deep in the dungeon cannot open it by accident.
+5. **Features are placed per run from the seed** rather than authored, so every dive is laid out differently without touching a schematic.
+6. **Real-time combat is always on in a dive** (it stays behind `authoredCombat` elsewhere). Without it dive enemies were passive.
+7. **Dive enemies are uncatchable and unbattleable.** The dungeon contract's catchable wild Pokémon are a separate thing and can be added as a calm pool later.
+8. **Without Lootr a dungeon with Outbreak settings runs as an ordinary dungeon**, with a warning, rather than half-working.
+9. **Loot left by a crashed or abandoned run is removed at next login.** A crash therefore costs unbanked loot, never banked loot (banking clears the mark at once).
+10. **Chest models are opt-in per dungeon** until the pack is hosted.
 
-## Enemy Cobblemon: dungeon mobs with spells and aggro styles (owner direction 2026-11-15)
+## Known gaps and next steps
 
-Dungeon mobs are hostile Cobblemon, not vanilla monsters. Each type dungeon draws them from its own pool, so the water dungeon is fought
-against Water-type Pokémon and plays differently from the others.
+1. **Play it.** One person, then a party, with the real client and the full mod set. Nothing here replaces that.
+2. **Is Lootr in the players' client pack?** Lootr registers its own blocks; a client without it may not be able to join. Confirm before relying on "Lootr is required".
+3. **Reconcile the `run` package.** `RunManager` and friends are a reconstruction (the originals were never committed because `.gitignore` hid them). The dive leans on `RunManager.leave`, member presence and the release order.
+4. **Run against AscensionLib** on the test server and read the `settleDungeonRun` statuses and `ledger` telemetry (`dungeon_run`).
+5. **Smuggling.** Covered: inventory, armour, offhand, cursor, ender chest, bundles, shulker boxes, party held items. Not covered: the Cobblemon PC if a player can open it inside a dive; items handed to another player who then extracts (allowed on purpose).
+6. **The boss is still the vanilla Tide Warden** unless `authoredRealtimeBoss` is on. Making bosses Pokémon everywhere is its own piece of work.
+7. **Spells are generic**, declared per spawn or per elite list, not tied to a species' real moves.
+8. **The other sixteen dungeons** need an `outbreak.json` each (data only) and their own spells.
+9. **Mid-run tier and rarity.** AscensionLib's wild rarity stops improving at tier 4; stages 3 to 5 are carried by spawn pressure and elites.
+10. **Polymer.** Per-player model displays (hide the model from players without the pack) would need Polymer here, as Towers and Raids use it.
 
-Already there (built before this doc; described in the code as untested with real players):
-- **Type decides the pool.** Every authored `layout.json` has `pokemon.pools`. Water: `wild_low` (psyduck, wooper, poliwag, lotad, tympole,
-  buizel, slowpoke), `wild_mid` (golduck, quagsire, poliwhirl, lombre, floatzel, palpitoad, slowbro), `trial` (wartortle .. seaking) and
-  `boss` (swampert, empoleon, gyarados, kingdra), with a base tier and per-player level scaling.
-- **Encounters already name a pool.** Each spawn lists a vanilla mob and a `pokemon` pool; with Cobblemon installed and `authoredPokemon`
-  on, the Pokémon is used instead.
-- **Real-time combat** (`AuthoredCombat`, behind `authoredCombat`): dungeon Pokémon hunt players and their sent-out Pokémon, use their
-  moves on cooldowns with type effectiveness, drain and recovery moves, statuses (`RealtimeStatus`) and affixes (`AffixFx`). A player's
-  Pokémon never dies: it faints, is recalled and healed, and cannot be sent out again for a cooldown.
+## Appendix: the Lootr hook (spiked 2026-11-15)
 
-What this direction adds:
-
-1. **Vanilla mobs go away.** Pokémon mode becomes the only mode for Outbreak dives; the vanilla entry in each spawn is only a fallback for
-   a server without Cobblemon. Bosses (the Tide Warden is a vanilla drowned today) become boss Pokémon from the `boss` pool.
-2. **Spells.** A spell is a telegraphed, dodgeable attack on top of a Pokémon's ordinary moves: a warning shape on the ground, then the
-   hit. Examples for water: a line of rising water (Surf), a whirlpool that pulls players in (Whirlpool), a bubble that slows (Bubble Beam).
-   Declared per pool or per species in `layout.json`, reusing the hazard shapes the engine already has (`zone`, `jet`, `vent`, `gust`).
-   Naming: "ability" already means something in Pokémon and in AscensionLib's vocabulary, so call these **spells** in design and show them
-   to players under the move's own name.
-3. **Aggro styles.** Today every dungeon Pokémon behaves the same (one sight range, hunt the nearest). Give each pool entry a style:
-
-   | Style | Behaviour |
-   |---|---|
-   | Hunter | chases the nearest target across the room |
-   | Sentry | holds a spot, attacks only what comes close |
-   | Ambusher | hidden or still until a player passes, then strikes |
-   | Skirmisher | keeps its distance and casts |
-   | Pack | weak alone, calls nearby pack members when one is hit |
-   | Guardian | protects a chest, altar or the portal; never leaves it |
-
-4. **The Outbreak drives it.** Higher stages raise spawn pressure (`spawnScale`), promote pools (`wild_low` to `wild_mid`) and make
-   **elites**: an enemy with an extra spell, a tougher aggro style and more health. A strongbox wave and the extraction portal draw from
-   the same pools.
-
-Logic goes where tests reach it: which style a spawn gets, when it changes target, when a spell fires and what it hits should be decided
-by Minecraft-free classes (like `OutbreakClock`), with `AuthoredCombat` only carrying the decision out.
-
-Open: (1) **Can enemy Cobblemon be caught or battled the normal way?** The AscensionLib contract rates wild captures inside a dungeon
-zone, while Towers' opponents are never catchable. Suggested: enemies are hostile and not catchable; a separate, calmer `wild` pool stays
-catchable. (2) Friendly fire and whether a player with no Pokémon out can fight. (3) Performance: how many real-time Pokémon a run level
-can hold at Outbreak stage 5 with four players. (4) Balance against AscensionLib's Threat bands, which were designed for turn-based fights.
+Read from Lootr 1.11.38.127 with `javap`. `ILootrFilter.mutate(ObjectArrayList<ItemStack>, LootFiller.LootFillerState, LootContext,
+RandomSource)` is called for every registered filter from Lootr's `MixinLootTable`, inside `LootTable.fill` just before
+`shuffleAndSplitItems`. It runs for every fill, and the state is null unless Lootr is doing a per-player roll. The state gives the
+player and the chest's dimension and position. Filters are found with `ServiceLoader`, so registration is a
+`META-INF/services/noobanidus.mods.lootr.common.api.filter.ILootrFilterProvider` file and the class only loads when Lootr does.
+Returning `true` stops later filters, so ours returns `false`.

@@ -84,6 +84,8 @@ public final class OutbreakDive {
         void zoneTier(int tier);
         /** Makes a real-time-combat creature hit harder. */
         void empower(Mob mob, double damageMultiplier);
+        /** Marks a creature as a dungeon enemy (a Pokémon becomes uncatchable and cannot be battled turn-based). */
+        void hostile(Mob mob);
         /** True when this creature's targeting is run by the real-time Pokémon combat, which asks {@link #chooseTarget}. */
         boolean combatManaged(Mob mob);
     }
@@ -145,6 +147,11 @@ public final class OutbreakDive {
     static OutbreakDive create(Host host) {
         JsonObject cfg = host.layout().outbreak();
         if (cfg == null) return null;
+        if (!lootrInstalled()) {
+            // Haul-only loss depends on Lootr's per-player loot and its fill hook; without it the dungeon runs as an ordinary one.
+            AscensionDungeonsLog.LOG.warn("{} has Outbreak settings but Lootr is not installed: running without the Outbreak", host.layout().id());
+            return null;
+        }
         try {
             return new OutbreakDive(host, cfg);
         } catch (RuntimeException e) {
@@ -152,6 +159,11 @@ public final class OutbreakDive {
             AscensionDungeonsLog.LOG.error("Outbreak settings for {} are invalid; running without the Outbreak", host.layout().id(), e);
             return null;
         }
+    }
+
+    /** Outbreak dives need Lootr (owner decision 2026-11-15). The chunk generator asks too, so features and dive agree. */
+    public static boolean lootrInstalled() {
+        return net.minecraft.core.registries.BuiltInRegistries.BLOCK.containsKey(ResourceLocation.fromNamespaceAndPath("lootr", "lootr_chest"));
     }
 
     private static int ticks(double seconds) { return Math.max(1, (int) Math.round(seconds * 20 / SPEED)); }
@@ -473,6 +485,7 @@ public final class OutbreakDive {
     private void register(Mob mob, Aggro.Style style, boolean elite, Spell spell) {
         Enemy en = new Enemy(mob, style, mob.position(), elite, spell);
         enemies.put(mob.getUUID(), en);
+        host.hostile(mob);
         // Vanilla creatures pick targets by themselves within their follow range; narrow it for the styles that hold ground.
         var follow = mob.getAttribute(Attributes.FOLLOW_RANGE);
         if (follow != null) {

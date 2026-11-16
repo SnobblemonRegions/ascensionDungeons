@@ -160,7 +160,7 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
             RandomizableContainer.setBlockEntityLootTable(level, level.getRandom(), pos, ResourceKey.create(Registries.LOOT_TABLE, ResourceLocation.parse(table)));
         }
         // Outbreak features for this run's seed: the blocks go in here, the dive runs them (OutbreakDive).
-        for (var f : layout.features(seed)) {
+        for (var f : OutbreakDive.lootrInstalled() ? layout.features(seed) : java.util.List.<com.ascensiondungeons.outbreak.FeaturePlanner.Placement>of()) {
             BlockPos pos = toWorld(f.cell());
             if (pos.getX() < x0 || pos.getX() >= x0 + 16 || pos.getZ() < z0 || pos.getZ() >= z0 + 16) continue;
             switch (f.kind()) {

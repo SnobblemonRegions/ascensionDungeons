@@ -229,6 +229,7 @@ public final class AuthoredDirector implements ArenaDirector {
         }
         @Override public void zoneTier(int tier) { if (ascension != null) ascension.openZone(level.dimension().location().toString(), tier); }
         @Override public void empower(Mob mob, double damageMultiplier) { if (combat != null) combat.empower(mob, damageMultiplier); }
+        @Override public void hostile(Mob mob) { if (pokemon != null) pokemon.hostile(mob); }
         /** Real-time Pokémon combat runs when the config asks for it, and always in an Outbreak dive (its enemies must fight). */
         boolean combatOn() { return combat != null && (cfg.authoredCombat || dive != null); }
         @Override public boolean combatManaged(Mob mob) { return combatOn() && aggressors.contains(mob); }
