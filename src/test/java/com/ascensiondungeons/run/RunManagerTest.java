@@ -237,6 +237,13 @@ class RunManagerTest {
     }
 
     @Test
+    void anOutbreakDiveRunsOnTheLongClockItsSettingsAskFor() {
+        Run dive = mgr.request(Set.of(alice), "water").run();
+        tickTo(3);
+        assertEquals(dive.stateSince() + 45 * 60 * 20, dive.deadline(), "water's outbreak.json asks for 45 minutes");
+    }
+
+    @Test
     void shutdownReleasesAndDeletesEveryLevel() {
         Run a = start(alice);
         Run b = start(bob);

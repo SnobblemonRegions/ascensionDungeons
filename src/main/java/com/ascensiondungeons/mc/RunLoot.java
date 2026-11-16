@@ -97,6 +97,52 @@ public final class RunLoot {
         return apply(player, s -> { UUID r = runOf(s); return r != null && !live.test(r); }, true);
     }
 
+    /**
+     * Loot of this run that is tucked away from a plain look at the inventory: inside bundles and shulker boxes, on the cursor,
+     * in the ender chest, or held by a party Pokémon. The extraction toll takes all of it, so hiding loot never pays.
+     */
+    public static int countHidden(ServerPlayer player, UUID run) {
+        Predicate<ItemStack> marked = s -> run.equals(runOf(s));
+        int[] n = {0};
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) n[0] += countNested(player.getInventory().getItem(i), marked);
+        Container ender = player.getEnderChestInventory();
+        for (int i = 0; i < ender.getContainerSize(); i++) { ItemStack s = ender.getItem(i); if (marked.test(s)) n[0]++; n[0] += countNested(s, marked); }
+        if (marked.test(player.containerMenu.getCarried())) n[0]++;
+        PartyItems party = partyItems;
+        if (party != null) {
+            try { party.each(player, held -> { if (marked.test(held)) n[0]++; return held; }); }
+            catch (RuntimeException | LinkageError e) { com.ascensiondungeons.AscensionDungeonsLog.LOG.warn("[run-loot] could not check party held items", e); }
+        }
+        return n[0];
+    }
+
+    private static int countNested(ItemStack holder, Predicate<ItemStack> marked) {
+        if (holder.isEmpty()) return 0;
+        int n = 0;
+        BundleContents bundle = holder.get(DataComponents.BUNDLE_CONTENTS);
+        if (bundle != null) for (ItemStack inner : bundle.items()) { if (marked.test(inner)) n++; n += countNested(inner, marked); }
+        ItemContainerContents box = holder.get(DataComponents.CONTAINER);
+        if (box != null) for (ItemStack inner : box.nonEmptyItems()) { if (marked.test(inner)) n++; n += countNested(inner, marked); }
+        return n;
+    }
+
+    /** Removes the hidden loot {@link #countHidden} counts. Returns how many stacks went. */
+    public static int stripHidden(ServerPlayer player, UUID run) {
+        Predicate<ItemStack> marked = s -> run.equals(runOf(s));
+        int n = 0;
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) n += nested(player.getInventory().getItem(i), marked, true);
+        n += container(player.getEnderChestInventory(), marked, true);
+        ItemStack carried = player.containerMenu.getCarried();
+        if (marked.test(carried)) { player.containerMenu.setCarried(ItemStack.EMPTY); n++; }
+        PartyItems party = partyItems;
+        if (party != null) {
+            try { n += party.each(player, held -> change(held, marked, true)); }
+            catch (RuntimeException | LinkageError e) { com.ascensiondungeons.AscensionDungeonsLog.LOG.warn("[run-loot] could not strip party held items", e); }
+        }
+        if (n > 0) player.inventoryMenu.broadcastChanges();
+        return n;
+    }
+
     private static int apply(ServerPlayer player, Predicate<ItemStack> marked, boolean remove) {
         int n = container(player.getInventory(), marked, remove) + container(player.getEnderChestInventory(), marked, remove);
         ItemStack carried = player.containerMenu.getCarried();

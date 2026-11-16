@@ -232,7 +232,13 @@ public final class RunManager {
 
     private long durationFor(Run run) {
         if (CINDERFORGE.equals(run.dungeonType())) return cfg.cinderforgeDurationTicks;
-        if (run.dungeonType() != null && com.ascensiondungeons.gen.authored.AuthoredDungeons.isAuthored(run.dungeonType())) return cfg.authoredDurationTicks;
+        if (run.dungeonType() != null && com.ascensiondungeons.gen.authored.AuthoredDungeons.isAuthored(run.dungeonType())) {
+            // An Outbreak dive is long on purpose: there is a lot to explore, and the Outbreak is what ends most runs.
+            var outbreak = com.ascensiondungeons.gen.authored.AuthoredLayout.get(run.dungeonType()).outbreak();
+            if (outbreak == null) return cfg.authoredDurationTicks;
+            int minutes = com.ascensiondungeons.gen.authored.Jx.i(outbreak, "durationMinutes", 0);
+            return minutes > 0 ? minutes * 60L * 20L : cfg.diveDurationTicks;
+        }
         return cfg.durationTicks;
     }
 

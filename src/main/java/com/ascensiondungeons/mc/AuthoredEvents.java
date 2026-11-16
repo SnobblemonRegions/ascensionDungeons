@@ -19,6 +19,9 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class AuthoredEvents {
     private AuthoredEvents() {}
 
+    /** True while a reduced hit is being re-applied, so the handler does not reduce it again. Server thread only. */
+    private static boolean reducing;
+
     public static void register(Supplier<AuthoredDirector> director) {
         // Nothing in the dungeon may be broken, or built on, except through its mechanics.
         PlayerBlockBreakEvents.BEFORE.register((level, player, pos, state, be) -> {
@@ -36,6 +39,25 @@ public final class AuthoredEvents {
         net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             AuthoredDirector d = director.get();
             if (d != null) d.onDeath(entity);
+        });
+        // Elites and gatekeepers that are Pokémon are tough by taking a share of each hit (their health cannot be raised).
+        net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+            if (reducing) return true;
+            AuthoredDirector d = director.get();
+            if (d == null) return true;
+            try {
+                AuthoredDirector.Session s = d.sessionFor(entity.level());
+                if (s == null || s.dive() == null) return true;
+                double tough = s.dive().toughness(entity);
+                if (tough <= 1.0) return true;
+                reducing = true;
+                try { entity.hurt(source, (float) (amount / tough)); }
+                finally { reducing = false; }
+                return false;
+            } catch (RuntimeException e) {
+                com.ascensiondungeons.AscensionDungeonsLog.LOG.error("Toughness handling failed; letting the full hit through", e);
+                return true;
+            }
         });
         // Nobody dies inside an Outbreak dive: a lethal hit knocks the player out of the run with what they banked.
         net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {

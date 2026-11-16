@@ -305,7 +305,7 @@ public final class AuthoredDirector implements ArenaDirector {
 
         @Override public BlockPos world(int[] c) { return gen.toWorld(c); }
         @Override public int[] schem(Entity e) { return gen.toSchematic(e.blockPosition()); }
-        double healthFactor() { return 1.0 + 0.6 * (partySizeAtStart - 1); }
+        @Override public double healthFactor() { return 1.0 + 0.6 * (partySizeAtStart - 1); }
         boolean peaceful() { return level.getDifficulty() == net.minecraft.world.Difficulty.PEACEFUL; }
 
         @Override public void say(String text, ChatFormatting colour) {
@@ -610,7 +610,8 @@ public final class AuthoredDirector implements ArenaDirector {
         @Override public Mob spawn(JsonObject def, int[] cell, double healthMul) {
             var chosen = pick(def);
             if (chosen != null) {
-                int lvl = com.ascensiondungeons.run.SpawnTable.level(chosen, rng) + Math.max(0, partySizeAtStart - 1) * Jx.i(Jx.o(layout.data().pokemon, "scaling"), "perPlayer", 0);
+                int lvl = com.ascensiondungeons.run.SpawnTable.level(chosen, rng) + Math.max(0, partySizeAtStart - 1) * Jx.i(Jx.o(layout.data().pokemon, "scaling"), "perPlayer", 0)
+                        + Jx.i(def, "levelBonus", 0);
                 Mob pk = pokemon.spawn(level, chosen.species, Math.min(100, lvl), world(cell), rng.nextFloat() * 360f);
                 if (pk != null) { aggressors.add(pk); return pk; }
             }

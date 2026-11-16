@@ -11,6 +11,7 @@ import com.ascensiondungeons.outbreak.FeaturePlanner;
 import com.ascensiondungeons.outbreak.Haul;
 import com.ascensiondungeons.outbreak.OutbreakClock;
 import com.ascensiondungeons.outbreak.Spell;
+import com.ascensiondungeons.outbreak.Toll;
 import com.ascensiondungeons.outbreak.WavePlanner;
 import com.ascensiondungeons.run.Run;
 import com.google.gson.JsonElement;
@@ -86,6 +87,8 @@ public final class OutbreakDive {
         void empower(Mob mob, double damageMultiplier);
         /** Marks a creature as a dungeon enemy (a Pokémon becomes uncatchable and cannot be battled turn-based). */
         void hostile(Mob mob);
+        /** How much tougher creatures are for this party's size. */
+        double healthFactor();
         /** True when this creature's targeting is run by the real-time Pokémon combat, which asks {@link #chooseTarget}. */
         boolean combatManaged(Mob mob);
     }
@@ -130,18 +133,26 @@ public final class OutbreakDive {
     private final Haul haul = new Haul();
     private final int baseTier;
     private final long waveEvery;
-    private final double portalRadius, chargeRadius;
+    private final double portalRadius;
+    private final int tollPercent;
+    /** Players standing on the portal who have already been shown the extraction screen; cleared when they step off. */
+    private final Set<UUID> atPortal = new HashSet<>();
+    private Mob gatekeeper;
     private final Map<String, Spell> spells = new HashMap<>();
+    /** Ring colour per spell id (0xRRGGBB), from the dungeon's type. */
+    private final Map<String, Integer> spellColours = new HashMap<>();
     private final Set<String> checkpoints = new HashSet<>();
     private final Map<BlockPos, Feature> features = new LinkedHashMap<>();
     private final Map<UUID, Enemy> enemies = new LinkedHashMap<>();
     private final Set<UUID> settled = new HashSet<>();
+    /** Creatures that take only a share of each hit: 4.0 means a quarter. This is how a Pokémon enemy is made tough (see {@link #scale}). */
+    private final Map<UUID, Double> toughness = new HashMap<>();
     private final ServerBossEvent outbreakBar, portalBar;
     private Vec3 portalCentre;
     private OutbreakClock clock;
     private long now, nextWaveAt;
     private boolean bossDown, closed;
-    private ExtractionPortal.State lastPortalState = ExtractionPortal.State.CHARGING;
+    private ExtractionPortal.State lastPortalState = ExtractionPortal.State.IDLE;
 
     /** The dive for this session, or null when its dungeon has no Outbreak settings. */
     static OutbreakDive create(Host host) {
@@ -178,9 +189,9 @@ public final class OutbreakDive {
         this.waves = new WavePlanner(Jx.i(w, "base", 2), Jx.i(w, "perStage", 1), Jx.i(w, "perExtraPlayer", 1), Jx.i(w, "maxAlive", 14));
         this.waveEvery = ticks(Jx.d(w, "everySeconds", 40));
         JsonObject p = Jx.o(cfg, "portal");
-        this.portal = new ExtractionPortal(new ExtractionPortal.Params(Jx.i(p, "charge", 10), ticks(Jx.d(p, "windowSeconds", 20)), Jx.i(p, "growthPercent", 50)));
+        this.portal = new ExtractionPortal(new ExtractionPortal.Params(ticks(Jx.d(p, "windowSeconds", 30)), Jx.i(p, "growthPercent", 25)));
         this.portalRadius = Jx.d(p, "radius", 2.5);
-        this.chargeRadius = Jx.d(p, "chargeRadius", 24);
+        this.tollPercent = Math.max(0, Math.min(100, Jx.i(p, "tollPercent", 35)));
         this.baseTier = Math.max(1, Jx.i(host.layout().data().pokemon, "tier", 1));
         for (JsonElement e : Jx.a(cfg, "checkpoints")) checkpoints.add(e.getAsString());
         for (JsonElement e : Jx.a(cfg, "spells")) {
@@ -189,6 +200,7 @@ public final class OutbreakDive {
                     Jx.d(s, "range", 10), Jx.d(s, "radius", 3), Jx.d(s, "damage", 4),
                     Spell.Effect.valueOf(Jx.s(s, "effect", "none").toUpperCase(java.util.Locale.ROOT)), Jx.d(s, "strength", 0));
             spells.put(spell.id(), spell);
+            spellColours.put(spell.id(), Jx.i(s, "colour", Jx.i(cfg, "colour", 0x33D9FF)));
         }
         for (FeaturePlanner.Placement pl : host.layout().features(host.run().seed())) {
             BlockPos pos = host.world(pl.cell());
@@ -216,7 +228,7 @@ public final class OutbreakDive {
     }
 
     public String describe() {
-        return "outbreak stage=" + stage() + " tier=" + tier() + " portal=" + portal.state() + " " + Math.round(portal.charge() * 100) + "% enemies=" + enemies.size()
+        return "outbreak stage=" + stage() + " tier=" + tier() + " portal=" + portal.state() + " gatekeepers=" + portal.gatekeepersDefeated() + " enemies=" + enemies.size()
                 + " features=" + features.size() + " settled=" + settled.size();
     }
 
@@ -230,6 +242,9 @@ public final class OutbreakDive {
 
     /** Operator aid: bank everyone's haul as a checkpoint would. */
     public void operatorCheckpoint() { if (!closed) checkpoint("Checkpoint (operator)"); }
+
+    /** Test aid: the gatekeeper being fought, or null. */
+    public Mob gatekeeperMob() { return gatekeeper != null && gatekeeper.isAlive() ? gatekeeper : null; }
 
     /** Test aid: the dive's living enemies. */
     public List<Mob> enemyMobs() {
@@ -248,6 +263,7 @@ public final class OutbreakDive {
             nextWaveAt = now + waveEvery;
             host.say("An Outbreak is building here. The longer you stay, the fiercer it gets and the more you carry out.", ChatFormatting.GOLD);
             host.say("Loot is yours only once it is banked at a checkpoint or carried out through the extraction portal near the entrance.", ChatFormatting.GRAY);
+            host.say("Leaving has a price: beat the portal's gatekeeper, which grows with the Outbreak, or pay a toll of " + tollPercent + "% of your unbanked loot.", ChatFormatting.GRAY);
         }
         // Anyone who walked out or dropped off without extracting keeps only what they banked.
         for (Map.Entry<UUID, Run.Member> e : host.run().members().entrySet())
@@ -258,17 +274,17 @@ public final class OutbreakDive {
 
         portal.tick(now);
         if (portal.state() != lastPortalState) {
-            if (portal.state() == ExtractionPortal.State.OPEN) {
-                host.say("The extraction portal is open! Reach it within " + portal.remaining(now) / 20 + " seconds.", ChatFormatting.AQUA);
-                sound(BlockPos.containing(portalCentre), SoundEvents.END_PORTAL_SPAWN, 0.6f, 1.2f);
-            } else if (lastPortalState == ExtractionPortal.State.OPEN) {
-                host.say("The extraction portal has closed. It needs more charge now.", ChatFormatting.RED);
-            }
+            if (lastPortalState == ExtractionPortal.State.OPEN && portal.state() == ExtractionPortal.State.IDLE)
+                host.say("The extraction portal has sealed again. Its next gatekeeper will be stronger.", ChatFormatting.RED);
             lastPortalState = portal.state();
         }
-        if (portal.state() == ExtractionPortal.State.OPEN)
-            for (ServerPlayer p : players)
-                if (!settled.contains(p.getUUID()) && p.position().distanceToSqr(portalCentre) <= portalRadius * portalRadius && portal.escape(p.getUUID(), now)) extract(p);
+        gatekeeperTick(players);
+        for (ServerPlayer p : players) {
+            if (settled.contains(p.getUUID())) continue;
+            if (p.position().distanceToSqr(portalCentre) > portalRadius * portalRadius) { atPortal.remove(p.getUUID()); continue; }
+            if (portal.state() == ExtractionPortal.State.OPEN) { if (portal.escape(p.getUUID(), now)) extract(p); }
+            else if (atPortal.add(p.getUUID())) offer(p);
+        }
 
         if (!bossDown && !players.isEmpty() && now >= nextWaveAt) {
             enemies.values().removeIf(en -> !en.mob.isAlive());
@@ -303,10 +319,14 @@ public final class OutbreakDive {
             portalBar.setName(Component.literal("Extraction portal: OPEN, " + (portal.remaining(now) + 19) / 20 + "s"));
             portalBar.setColor(BossEvent.BossBarColor.WHITE);
             portalBar.setProgress(1f);
+        } else if (portal.state() == ExtractionPortal.State.FIGHT && gatekeeper != null) {
+            portalBar.setName(Component.literal(gatekeeper.getName().getString()));
+            portalBar.setColor(BossEvent.BossBarColor.RED);
+            portalBar.setProgress(Math.max(0f, Math.min(1f, gatekeeper.getHealth() / gatekeeper.getMaxHealth())));
         } else {
-            portalBar.setName(Component.literal("Extraction portal: " + Math.round(portal.charge() * 100) + "% charged (defeat enemies near it)"));
+            portalBar.setName(Component.literal("Extraction portal: beat its gatekeeper, or pay the " + tollPercent + "% toll"));
             portalBar.setColor(BossEvent.BossBarColor.BLUE);
-            portalBar.setProgress((float) portal.charge());
+            portalBar.setProgress(0f);
         }
         for (ServerBossEvent bar : List.of(outbreakBar, portalBar)) {
             for (ServerPlayer p : players) bar.addPlayer(p);
@@ -396,7 +416,7 @@ public final class OutbreakDive {
         if (online != null) {
             stacks = kept ? RunLoot.clearAll(online, runId()) : RunLoot.stripAll(online, runId());
             String text = switch (exit) {
-                case EXTRACTED -> "Extracted! You keep everything: " + describe(s) + ".";
+                case EXTRACTED -> "Extracted! You leave with: " + describe(s) + ".";
                 case DIED -> "Knocked out. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
                 case TIMED_OUT -> "Time ran out. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
                 case LEFT -> "You left without extracting. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
@@ -446,7 +466,7 @@ public final class OutbreakDive {
             if (tooClose) continue;
             JsonObject def = eligible.get(rng.nextInt(eligible.size()));
             boolean isElite = rng.nextDouble() < params.eliteChance(stage);
-            Mob mob = host.spawn(def, cell, isElite ? Jx.d(elite, "healthMultiplier", 2.0) : 1.0);
+            Mob mob = host.spawn(def, cell, 1.0);
             if (mob == null) continue;
             String spellId = Jx.s(def, "spell", null);
             if (isElite) {
@@ -456,7 +476,7 @@ public final class OutbreakDive {
                 String base = mob.hasCustomName() ? mob.getCustomName().getString() : mob.getName().getString();
                 mob.setCustomName(Component.literal("Elite " + base).withStyle(ChatFormatting.LIGHT_PURPLE));
                 mob.setCustomNameVisible(true);
-                host.empower(mob, Jx.d(elite, "damageMultiplier", 1.4));
+                scale(mob, Jx.d(elite, "healthMultiplier", 2.0), Jx.d(elite, "damageMultiplier", 1.4));
             }
             Aggro.Style style = Aggro.Style.parse(Jx.s(def, "style", null), Aggro.Style.HUNTER);
             register(mob, style, isElite, spells.get(spellId));
@@ -525,7 +545,7 @@ public final class OutbreakDive {
             if (!players.isEmpty()) {
                 boolean near = false;
                 for (ServerPlayer p : players) if (p.distanceToSqr(en.mob) < LET_GO * LET_GO) { near = true; break; }
-                if (!near) { en.mob.discard(); it.remove(); continue; }
+                if (!near && en.mob != gatekeeper) { en.mob.discard(); it.remove(); continue; }
             }
             if (host.combatManaged(en.mob)) continue;
             Aggro.Decision d = decide(en, targets);
@@ -557,15 +577,210 @@ public final class OutbreakDive {
         return null;
     }
 
-    /** Something died in the dive's level. A kill near the portal charges it. */
+    /** How many times tougher than normal this creature is: 1 for anything the dive has not toughened. */
+    public double toughness(Entity e) { return closed ? 1.0 : toughness.getOrDefault(e.getUUID(), 1.0); }
+
+    /** Something died in the dive's level. When it is the gatekeeper, the portal opens. */
     void entityDied(LivingEntity e) {
         if (closed || !(e instanceof Mob mob)) return;
-        Enemy en = enemies.remove(mob.getUUID());
-        if (mob instanceof OwnableEntity owned && owned.getOwnerUUID() != null) return;
-        if (mob.position().distanceToSqr(portalCentre) > chargeRadius * chargeRadius) return;
-        double weight = en != null && en.elite ? Jx.d(Jx.o(cfg, "elite"), "killWeight", 3) : 1;
-        portal.onKill(weight, now);
-        host.level().sendParticles(ParticleTypes.SOUL_FIRE_FLAME, mob.getX(), mob.getY() + 0.8, mob.getZ(), 8, 0.2, 0.3, 0.2, 0.02);
+        enemies.remove(mob.getUUID());
+        toughness.remove(mob.getUUID());
+        if (mob != gatekeeper) return;
+        gatekeeper = null;
+        portal.gatekeeperDefeated(now);
+        host.say("The gatekeeper has fallen! The portal is open for " + portal.remaining(now) / 20 + " seconds: step through and keep everything.", ChatFormatting.AQUA);
+        sound(BlockPos.containing(portalCentre), SoundEvents.END_PORTAL_SPAWN, 0.6f, 1.2f);
+        host.level().sendParticles(ParticleTypes.END_ROD, portalCentre.x, portalCentre.y + 1.5, portalCentre.z, 80, 0.6, 1.2, 0.6, 0.05);
+        AscensionDungeonsLog.LOG.info("[dive] run {} gatekeeper defeated at stage {} ({} so far)", runId(), stage(), portal.gatekeepersDefeated());
+    }
+
+    // ---- extraction: the gatekeeper and the toll ----------------------------------------------------------------
+
+    /** What the toll would take from one player right now. */
+    private record Offer(List<net.minecraft.world.item.ItemStack> kinds, int[] counts, Toll.Plan plan, int hidden, int unbankedWins) {
+        /** Changes when the player's unbanked loot changes, so a stale screen cannot be confirmed. */
+        String fingerprint() {
+            StringBuilder sb = new StringBuilder().append(hidden).append('/').append(unbankedWins);
+            for (int i = 0; i < counts.length; i++) sb.append('|').append(kinds.get(i).getItem()).append('x').append(counts[i]).append('-').append(plan.lostPerKind()[i]);
+            return sb.toString();
+        }
+        boolean free() { return plan.itemsLost() == 0 && plan.winsLost() == 0 && hidden == 0; }
+    }
+
+    private boolean ours(net.minecraft.world.item.ItemStack s) { return !s.isEmpty() && runId().equals(RunLoot.runOf(s)); }
+
+    private Offer offerFor(ServerPlayer p) {
+        List<net.minecraft.world.item.ItemStack> kinds = new ArrayList<>();
+        List<Integer> counts = new ArrayList<>();
+        var inv = p.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            var s = inv.getItem(i);
+            if (!ours(s)) continue;
+            int k = -1;
+            for (int j = 0; j < kinds.size(); j++) if (net.minecraft.world.item.ItemStack.isSameItemSameComponents(kinds.get(j), s)) { k = j; break; }
+            if (k < 0) { kinds.add(s.copyWithCount(1)); counts.add(s.getCount()); } else counts.set(k, counts.get(k) + s.getCount());
+        }
+        int[] c = new int[counts.size()];
+        for (int i = 0; i < c.length; i++) c[i] = counts.get(i);
+        int wins = haul.unbankedWins(p.getUUID());
+        // Seeded by run and player, so the same loot always shows, and costs, the same items.
+        Toll.Plan plan = Toll.plan(c, wins, tollPercent, host.run().seed() ^ p.getUUID().getLeastSignificantBits());
+        return new Offer(kinds, c, plan, RunLoot.countHidden(p, runId()), wins);
+    }
+
+    private static net.minecraft.world.item.ItemStack button(net.minecraft.world.item.Item item, String name, ChatFormatting colour, String... lore) {
+        var stack = new net.minecraft.world.item.ItemStack(item);
+        stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, Component.literal(name).withStyle(st -> st.withColor(colour).withItalic(false)));
+        List<Component> lines = new ArrayList<>();
+        for (String l : lore) lines.add(Component.literal(l).withStyle(st -> st.withColor(ChatFormatting.GRAY).withItalic(false)));
+        stack.set(net.minecraft.core.component.DataComponents.LORE, new net.minecraft.world.item.component.ItemLore(lines));
+        return stack;
+    }
+
+    /** Shows the extraction screen: exactly what the toll would take, and the choices. */
+    private void offer(ServerPlayer p) {
+        Offer o = offerFor(p);
+        var box = new net.minecraft.world.SimpleContainer(54);
+        int slot = 0;
+        for (int i = 0; i < o.kinds().size() && slot < TollMenu.SHOWN; i++) {
+            int lost = o.plan().lostPerKind()[i];
+            while (lost > 0 && slot < TollMenu.SHOWN) {
+                int n = Math.min(lost, o.kinds().get(i).getMaxStackSize());
+                box.setItem(slot++, o.kinds().get(i).copyWithCount(n));
+                lost -= n;
+            }
+        }
+        int stage = stage();
+        String stageName = STAGE_NAMES[Math.min(stage, STAGE_NAMES.length - 1)];
+        box.setItem(TollMenu.PAY, o.free()
+                ? button(net.minecraft.world.item.Items.LIME_CONCRETE, "Leave now", ChatFormatting.GREEN, "You have nothing unbanked to lose.")
+                : button(net.minecraft.world.item.Items.RED_CONCRETE, "Pay the toll and leave", ChatFormatting.RED,
+                        "You lose the " + o.plan().itemsLost() + " item(s) shown above (" + tollPercent + "% of your unbanked loot)",
+                        o.plan().winsLost() > 0 ? "and " + o.plan().winsLost() + " of your " + o.unbankedWins() + " unbanked win(s)." : "and none of your unbanked wins.",
+                        o.hidden() > 0 ? "Also lost: " + o.hidden() + " stack(s) tucked into bundles, boxes, your ender chest or on a Pokemon." : "Everything else leaves with you."));
+        box.setItem(TollMenu.FIGHT, portal.state() == ExtractionPortal.State.FIGHT
+                ? button(net.minecraft.world.item.Items.IRON_SWORD, "The gatekeeper is being fought", ChatFormatting.YELLOW, "Help beat it: the portal then opens for everyone.")
+                : button(net.minecraft.world.item.Items.NETHERITE_SWORD, "Challenge the gatekeeper", ChatFormatting.GOLD,
+                        "Outbreak stage " + stage + " (" + stageName + "): the higher the stage, the stronger it is.",
+                        "Beat it and everyone leaves with everything.",
+                        "Be knocked out and you lose all your unbanked loot."));
+        box.setItem(TollMenu.STAY, button(net.minecraft.world.item.Items.BARRIER, "Keep exploring", ChatFormatting.WHITE, "Step off the portal and back on to see this again."));
+        String fingerprint = o.fingerprint();
+        p.openMenu(new net.minecraft.world.SimpleMenuProvider((id, inv, player) -> new TollMenu(id, inv, box, choice -> host.later(1, () -> chosen(p, choice, fingerprint))),
+                Component.literal("Extraction: fight or pay")));
+    }
+
+    private void chosen(ServerPlayer p, int choice, String fingerprint) {
+        if (p.containerMenu instanceof TollMenu) p.closeContainer();
+        if (closed || settled.contains(p.getUUID()) || p.level() != host.level()) return;
+        if (choice == TollMenu.PAY) payToll(p, fingerprint);
+        else if (choice == TollMenu.FIGHT) challenge(p);
+    }
+
+    /** Takes exactly what the screen showed, then lets the player out. If their loot changed since, they are shown the screen again. */
+    private void payToll(ServerPlayer p, String fingerprint) {
+        Offer o = offerFor(p);
+        if (!o.fingerprint().equals(fingerprint)) {
+            p.sendSystemMessage(Component.literal("Your loot changed. Look at the toll again before you pay it.").withStyle(ChatFormatting.YELLOW));
+            offer(p);
+            return;
+        }
+        var inv = p.getInventory();
+        for (int k = 0; k < o.kinds().size(); k++) {
+            int owed = o.plan().lostPerKind()[k];
+            for (int i = 0; i < inv.getContainerSize() && owed > 0; i++) {
+                var s = inv.getItem(i);
+                if (!ours(s) || !net.minecraft.world.item.ItemStack.isSameItemSameComponents(o.kinds().get(k), s)) continue;
+                int take = Math.min(owed, s.getCount());
+                s.shrink(take);
+                owed -= take;
+            }
+        }
+        int hidden = RunLoot.stripHidden(p, runId());
+        int wins = haul.forfeitWins(p.getUUID(), o.plan().winsLost());
+        AscensionDungeonsLog.LOG.info("[dive] run {} toll paid by {}: {} item(s), {} hidden stack(s), {} win(s) at stage {}", runId(), p.getGameProfile().getName(),
+                o.plan().itemsLost(), hidden, wins, stage());
+        p.sendSystemMessage(Component.literal("Toll paid: " + o.plan().itemsLost() + " item(s)" + (hidden > 0 ? ", " + hidden + " hidden stack(s)" : "")
+                + (wins > 0 ? " and " + wins + " win(s)" : "") + " lost.").withStyle(ChatFormatting.RED));
+        extract(p);
+    }
+
+    private void challenge(ServerPlayer p) {
+        if (portal.state() == ExtractionPortal.State.FIGHT) { p.displayClientMessage(Component.literal("The gatekeeper is already being fought.").withStyle(ChatFormatting.YELLOW), true); return; }
+        if (!portal.challenge()) return;
+        if (!spawnGatekeeper()) {
+            portal.challengeFailed();
+            p.sendSystemMessage(Component.literal("No gatekeeper answers. Try again in a moment.").withStyle(ChatFormatting.GRAY));
+            return;
+        }
+        host.say(p.getGameProfile().getName() + " calls out the gatekeeper! Beat it and the portal opens for everyone.", ChatFormatting.GOLD);
+        sound(BlockPos.containing(portalCentre), SoundEvents.WITHER_SPAWN, 0.6f, 1.0f);
+    }
+
+    /** The gatekeeper: drawn from the dungeon's boss pool, tougher with every Outbreak stage and with every gatekeeper already beaten. */
+    private boolean spawnGatekeeper() {
+        JsonObject g = Jx.o(cfg, "gatekeeper");
+        if (g == null) return false;
+        AuthoredLayout.Room room = roomOf(portalCentre);
+        if (room == null || room.spawnCells.length == 0) room = nearestRoom(portalCentre);
+        if (room == null) return false;
+        int[] best = null;
+        double bestD = Double.MAX_VALUE;
+        for (int[] c : room.spawnCells) {
+            double d = Vec3.atBottomCenterOf(host.world(c)).distanceToSqr(portalCentre);
+            if (d >= 5 * 5 && d < bestD) { bestD = d; best = c; }
+        }
+        if (best == null) best = room.spawnCells[0];
+        int stage = stage();
+        JsonObject def = g.deepCopy();
+        def.addProperty("levelBonus", Jx.i(g, "levelPerStage", 3) * stage);
+        Mob mob = host.spawn(def, best, 1.0);
+        if (mob == null) return false;
+        double strength = portal.gatekeeperStrength();
+        scale(mob, Jx.d(g, "health", 6.0) * (1 + Jx.d(g, "healthPerStage", 0.5) * stage) * strength * (host.combatManaged(mob) ? host.healthFactor() : 1.0),
+                (1 + Jx.d(g, "damagePerStage", 0.2) * stage) * strength);
+        mob.setGlowingTag(true);
+        mob.setCustomName(Component.literal(Jx.s(g, "name", "Gatekeeper") + " (stage " + stage + ")").withStyle(ChatFormatting.GOLD));
+        mob.setCustomNameVisible(true);
+        com.google.gson.JsonArray pool = Jx.a(g, "spells");
+        Spell spell = pool.size() == 0 ? null : spells.get(pool.get(host.random().nextInt(pool.size())).getAsString());
+        register(mob, Aggro.Style.HUNTER, true, spell);
+        gatekeeper = mob;
+        AscensionDungeonsLog.LOG.info("[dive] run {} gatekeeper {} called at stage {}: health {} strength x{}", runId(), mob.getName().getString(), stage, mob.getMaxHealth(), strength);
+        return true;
+    }
+
+    /**
+     * Tougher and harder-hitting. A vanilla creature gets more health and attack on its attributes. A Pokémon cannot: Cobblemon
+     * keeps its entity's health in step with its stats (a raised maximum is reset within ticks), so it takes a share of each hit
+     * instead, which lasts the same number of hits; real-time combat takes its damage factor.
+     */
+    private void scale(Mob mob, double health, double damage) {
+        if (health != 1.0) {
+            if (host.combatManaged(mob)) toughness.put(mob.getUUID(), health);
+            else {
+                var max = mob.getAttribute(Attributes.MAX_HEALTH);
+                if (max != null) { max.setBaseValue(max.getBaseValue() * health); mob.setHealth(mob.getMaxHealth()); }
+            }
+        }
+        if (damage == 1.0) return;
+        if (host.combatManaged(mob)) host.empower(mob, damage);
+        else {
+            var attack = mob.getAttribute(Attributes.ATTACK_DAMAGE);
+            if (attack != null) attack.setBaseValue(attack.getBaseValue() * damage);
+        }
+    }
+
+    /** A gatekeeper nobody is left to fight goes away, and the portal waits again. */
+    private void gatekeeperTick(List<ServerPlayer> players) {
+        if (portal.state() != ExtractionPortal.State.FIGHT || now % 20 != 0) return;
+        boolean anyone = false;
+        if (gatekeeper != null && gatekeeper.isAlive())
+            for (ServerPlayer p : players) if (!settled.contains(p.getUUID()) && p.position().distanceToSqr(portalCentre) < 48 * 48) { anyone = true; break; }
+        if (anyone) return;
+        if (gatekeeper != null) { enemies.remove(gatekeeper.getUUID()); gatekeeper.discard(); gatekeeper = null; }
+        portal.challengeFailed();
+        host.say("The gatekeeper withdraws. The portal waits.", ChatFormatting.GRAY);
     }
 
     // ---- spells ----------------------------------------------------------------------------------------------
@@ -584,13 +799,15 @@ public final class OutbreakDive {
                             p.displayClientMessage(Component.literal(en.mob.getName().getString() + " is casting " + en.spell.name() + "!").withStyle(ChatFormatting.AQUA), true);
                 }
             } else if (phase == Spell.Cast.Phase.WARNING) {
-                if (now % 4 == 0) ring(en.castCentre, en.spell.radius(), new DustParticleOptions(new Vector3f(0.2f, 0.85f, 1f), 1.2f));
+                if (now % 4 == 0) ring(en.castCentre, en.spell.radius(), new DustParticleOptions(rgb(spellColours.getOrDefault(en.spell.id(), 0x33D9FF)), 1.2f));
             } else {
                 land(en, players);
                 en.cast.finish();
             }
         }
     }
+
+    private static Vector3f rgb(int colour) { return new Vector3f(((colour >> 16) & 255) / 255f, ((colour >> 8) & 255) / 255f, (colour & 255) / 255f); }
 
     private void ring(Vec3 c, double radius, DustParticleOptions dust) {
         int points = Math.max(12, (int) (radius * 8));
@@ -604,21 +821,34 @@ public final class OutbreakDive {
         Spell s = en.spell;
         Vec3 c = en.castCentre;
         ServerLevel level = host.level();
-        level.sendParticles(ParticleTypes.SPLASH, c.x, c.y + 0.3, c.z, 80, s.radius() / 2, 0.3, s.radius() / 2, 0.1);
-        level.sendParticles(ParticleTypes.BUBBLE_POP, c.x, c.y + 0.5, c.z, 40, s.radius() / 2, 0.5, s.radius() / 2, 0.05);
-        sound(BlockPos.containing(c), SoundEvents.GENERIC_SPLASH, 1f, 0.9f);
+        level.sendParticles(new DustParticleOptions(rgb(spellColours.getOrDefault(s.id(), 0x33D9FF)), 1.6f), c.x, c.y + 0.4, c.z, 90, s.radius() / 2, 0.4, s.radius() / 2, 0.1);
+        level.sendParticles(ParticleTypes.POOF, c.x, c.y + 0.3, c.z, 20, s.radius() / 2, 0.2, s.radius() / 2, 0.02);
+        sound(BlockPos.containing(c), SoundEvents.GENERIC_EXPLODE.value(), 0.5f, 1.4f);
         for (ServerPlayer p : players) {
             double dx = p.getX() - c.x, dz = p.getZ() - c.z;
             if (dx * dx + dz * dz > s.radius() * s.radius() || Math.abs(p.getY() - c.y) > 3 || p.isCreative()) continue;
             if (s.damage() > 0) p.hurt(level.damageSources().magic(), (float) s.damage());
             if (!p.isAlive() || settled.contains(p.getUUID())) continue;
+            int lasting = Math.max(1, (int) (s.strength() * 20));
             switch (s.effect()) {
                 case PULL -> {
                     Vec3 pull = new Vec3(c.x - p.getX(), 0, c.z - p.getZ());
                     if (pull.lengthSqr() > 0.01) { p.setDeltaMovement(pull.normalize().scale(s.strength()).add(0, 0.15, 0)); p.hurtMarked = true; }
                 }
+                case PUSH -> {
+                    Vec3 push = new Vec3(p.getX() - c.x, 0, p.getZ() - c.z);
+                    p.setDeltaMovement((push.lengthSqr() > 0.01 ? push.normalize() : new Vec3(1, 0, 0)).scale(s.strength()).add(0, 0.25, 0));
+                    p.hurtMarked = true;
+                }
                 case KNOCKUP -> { p.setDeltaMovement(p.getDeltaMovement().x, s.strength(), p.getDeltaMovement().z); p.hurtMarked = true; }
-                case SLOW -> p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, (int) (s.strength() * 20), 2));
+                case SLOW -> p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, lasting, 2));
+                case FREEZE -> { p.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SLOWDOWN, lasting, 4)); p.setTicksFrozen(Math.max(p.getTicksFrozen(), lasting + 140)); }
+                case BURN -> p.igniteForSeconds((float) s.strength());
+                case POISON -> p.addEffect(new MobEffectInstance(MobEffects.POISON, lasting, 0));
+                case WITHER -> p.addEffect(new MobEffectInstance(MobEffects.WITHER, lasting, 0));
+                case BLIND -> p.addEffect(new MobEffectInstance(MobEffects.DARKNESS, lasting, 0));
+                case LEVITATE -> p.addEffect(new MobEffectInstance(MobEffects.LEVITATION, lasting, 1));
+                case WEAKEN -> p.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, lasting, 0));
                 case NONE -> { }
             }
         }
@@ -706,7 +936,7 @@ public final class OutbreakDive {
             switch (f.kind) {
                 case PORTAL -> {
                     boolean open = portal.state() == ExtractionPortal.State.OPEN;
-                    text = open ? "Extraction Portal: OPEN" : "Extraction Portal (" + Math.round(portal.charge() * 100) + "%)";
+                    text = open ? "Extraction Portal: OPEN" : portal.state() == ExtractionPortal.State.FIGHT ? "Extraction Portal: beat the gatekeeper" : "Extraction Portal: fight or pay the toll";
                     colour = open ? 0xFFFFFF : 0x55CCFF;
                     level.sendParticles(open ? ParticleTypes.END_ROD : ParticleTypes.PORTAL, portalCentre.x, portalCentre.y + (open ? 1.5 : 0.6), portalCentre.z, open ? 30 : 12, 0.5, open ? 1.2 : 0.4, 0.5, 0.02);
                 }

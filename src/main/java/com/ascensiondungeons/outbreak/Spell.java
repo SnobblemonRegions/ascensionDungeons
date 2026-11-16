@@ -11,10 +11,30 @@ package com.ascensiondungeons.outbreak;
  * @param radius        the circle's radius
  * @param damage        damage to each player in the circle when it lands
  * @param effect        what else the hit does
- * @param strength      effect size: blocks per tick for PULL and KNOCKUP, seconds for SLOW
+ * @param strength      effect size: blocks per tick for PULL, PUSH and KNOCKUP; seconds for every lasting effect
  */
 public record Spell(String id, String name, int cooldownTicks, int warnTicks, double range, double radius, double damage, Effect effect, double strength) {
-    public enum Effect { NONE, PULL, SLOW, KNOCKUP }
+    public enum Effect {
+        NONE,
+        /** Dragged toward the centre. */
+        PULL,
+        /** Thrown away from the centre. */
+        PUSH,
+        /** Thrown upward. */
+        KNOCKUP,
+        SLOW,
+        /** Slowed hard and chilled. */
+        FREEZE,
+        BURN,
+        POISON,
+        WITHER,
+        /** Sight taken away. */
+        BLIND,
+        /** Lifted off the ground. */
+        LEVITATE,
+        /** Hits weaker. */
+        WEAKEN
+    }
 
     public Spell {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("a spell needs an id");

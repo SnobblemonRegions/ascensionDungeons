@@ -6,85 +6,83 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class ExtractionPortalTest {
-    // needs 10 kills' worth of charge, stays open 400 ticks, each miss costs 50 percent more charge.
-    private final ExtractionPortal.Params p = new ExtractionPortal.Params(10, 400, 50);
+    // open for 400 ticks after the gatekeeper falls; each gatekeeper beaten makes the next 25 percent stronger.
+    private final ExtractionPortal.Params p = new ExtractionPortal.Params(400, 25);
     private final UUID a = UUID.randomUUID();
 
     @Test
-    void startsChargingAndOpensWhenFull() {
+    void itWaitsUntilSomeoneChallengesTheGatekeeper() {
         ExtractionPortal x = new ExtractionPortal(p);
-        assertEquals(ExtractionPortal.State.CHARGING, x.state());
-        x.onKill(4, 0);
-        assertEquals(ExtractionPortal.State.CHARGING, x.state());
-        assertEquals(0.4, x.charge(), 1e-9);
-        x.onKill(6, 100);
+        assertEquals(ExtractionPortal.State.IDLE, x.state());
+        assertFalse(x.escape(a, 0), "nobody leaves free before the gatekeeper falls");
+        assertTrue(x.challenge());
+        assertEquals(ExtractionPortal.State.FIGHT, x.state());
+        assertFalse(x.challenge(), "one gatekeeper at a time");
+        assertFalse(x.escape(a, 10));
+    }
+
+    @Test
+    void beatingTheGatekeeperOpensThePortalForAWindow() {
+        ExtractionPortal x = new ExtractionPortal(p);
+        x.challenge();
+        x.gatekeeperDefeated(100);
         assertEquals(ExtractionPortal.State.OPEN, x.state());
-        assertEquals(1.0, x.charge(), 1e-9);
         assertEquals(400, x.remaining(100));
-    }
-
-    @Test
-    void chargeOverflowDoesNotCarryAndWeightsMustBePositive() {
-        ExtractionPortal x = new ExtractionPortal(p);
-        x.onKill(25, 0);
-        assertEquals(1.0, x.charge(), 1e-9);
-        assertThrows(IllegalArgumentException.class, () -> x.onKill(0, 0));
-        assertThrows(IllegalArgumentException.class, () -> x.onKill(-1, 0));
-    }
-
-    @Test
-    void onlyAnOpenPortalLetsPlayersEscape() {
-        ExtractionPortal x = new ExtractionPortal(p);
-        assertFalse(x.escape(a, 0));
-        x.onKill(10, 0);
-        assertTrue(x.escape(a, 100));
-        assertTrue(x.escaped().contains(a));
-        assertTrue(x.escape(a, 150), "escaping twice is harmless");
+        assertTrue(x.escape(a, 300));
+        assertTrue(x.escape(a, 310), "escaping twice is harmless");
         assertEquals(1, x.escaped().size());
+        x.tick(499);
+        assertEquals(ExtractionPortal.State.OPEN, x.state());
+        x.tick(500);
+        assertEquals(ExtractionPortal.State.IDLE, x.state());
+        assertFalse(x.escape(UUID.randomUUID(), 501));
     }
 
     @Test
-    void theWindowClosesAndTheNextChargeCostsMore() {
+    void aFailedChallengeSendsTheGatekeeperAway() {
         ExtractionPortal x = new ExtractionPortal(p);
-        x.onKill(10, 0);
-        x.tick(399);
-        assertEquals(ExtractionPortal.State.OPEN, x.state());
-        x.tick(400);
-        assertEquals(ExtractionPortal.State.CHARGING, x.state());
-        assertEquals(0.0, x.charge(), 1e-9);
-        assertFalse(x.escape(a, 401));
-        x.onKill(10, 401);
-        assertEquals(ExtractionPortal.State.CHARGING, x.state(), "now needs 15");
-        x.onKill(5, 402);
-        assertEquals(ExtractionPortal.State.OPEN, x.state());
-        assertEquals(2, x.timesOpened());
+        x.challenge();
+        x.challengeFailed();
+        assertEquals(ExtractionPortal.State.IDLE, x.state());
+        assertEquals(0, x.gatekeepersDefeated());
+        assertTrue(x.challenge(), "it can be called out again");
     }
 
     @Test
-    void killsDuringTheOpenWindowAreIgnored() {
+    void eachGatekeeperBeatenMakesTheNextStronger() {
         ExtractionPortal x = new ExtractionPortal(p);
-        x.onKill(10, 0);
-        x.onKill(50, 10);
-        x.tick(400);
-        assertEquals(0.0, x.charge(), 1e-9, "the window's kills do not pre-charge the next opening");
+        assertEquals(1.0, x.gatekeeperStrength(), 1e-9);
+        x.challenge(); x.gatekeeperDefeated(0); x.tick(400);
+        assertEquals(1.25, x.gatekeeperStrength(), 1e-9);
+        x.challenge(); x.gatekeeperDefeated(500); x.tick(900);
+        assertEquals(1.5625, x.gatekeeperStrength(), 1e-9);
+        assertEquals(2, x.gatekeepersDefeated());
+    }
+
+    @Test
+    void defeatOnlyCountsDuringAFight() {
+        ExtractionPortal x = new ExtractionPortal(p);
+        x.gatekeeperDefeated(0);
+        assertEquals(ExtractionPortal.State.IDLE, x.state());
+        assertEquals(0, x.gatekeepersDefeated());
     }
 
     @Test
     void closingTheRunStopsTheMachine() {
         ExtractionPortal x = new ExtractionPortal(p);
-        x.onKill(10, 0);
+        x.challenge();
+        x.gatekeeperDefeated(0);
         x.close();
         assertEquals(ExtractionPortal.State.CLOSED, x.state());
         assertFalse(x.escape(a, 10));
-        x.onKill(10, 20);
+        assertFalse(x.challenge());
         x.tick(1000);
         assertEquals(ExtractionPortal.State.CLOSED, x.state());
     }
 
     @Test
     void invalidParametersAreRejected() {
-        assertThrows(IllegalArgumentException.class, () -> new ExtractionPortal.Params(0, 400, 50));
-        assertThrows(IllegalArgumentException.class, () -> new ExtractionPortal.Params(10, 0, 50));
-        assertThrows(IllegalArgumentException.class, () -> new ExtractionPortal.Params(10, 400, -1));
+        assertThrows(IllegalArgumentException.class, () -> new ExtractionPortal.Params(0, 25));
+        assertThrows(IllegalArgumentException.class, () -> new ExtractionPortal.Params(400, -1));
     }
 }

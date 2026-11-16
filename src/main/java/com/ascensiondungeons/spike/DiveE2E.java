@@ -240,17 +240,102 @@ public final class DiveE2E {
                 return count()[1] > 0;
             }
         }));
-        steps.add(new Step("run 2: kills near the portal charge it, and standing on it extracts with everything", 3600, () -> {
-            OutbreakDive d = dive();
-            if (d == null) {
-                int[] c = count();
-                AscensionDungeonsLog.LOG.info("DIVE-E2E after extraction: stacks {} marked {} (carried {})", c[0], c[1], carried);
-                return bot.level() == server.overworld() && c[0] == carried && c[1] == 0;
+        steps.add(new Step("run 2: loot a second chest", 100, new BooleanSupplier() {
+            boolean used;
+            @Override public boolean getAsBoolean() {
+                if (!used) { use(features("CHEST").get(1)); used = true; return false; }
+                return takeAll();
             }
-            Vec3 p = d.portalCentre();
-            if (bot.position().distanceToSqr(p) > 1) bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f);
-            for (Mob m : d.enemyMobs()) if (m.position().distanceToSqr(p) < 20 * 20) m.kill();
-            return false;
+        }));
+        if (cobblemon) steps.add(new Step("run 2: some of the loot is hidden on a Pokémon", 40, () -> Party.hideSecond(bot)));
+        steps.add(new Step("run 2: stepping on the portal shows exactly what the 35% toll would take", 200, new BooleanSupplier() {
+            boolean moved;
+            @Override public boolean getAsBoolean() {
+                OutbreakDive d = dive();
+                if (!moved) { Vec3 p = d.portalCentre(); bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f); moved = true; return false; }
+                if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.TollMenu menu)) return false;
+                int marked = 0;
+                for (int i = 0; i < bot.getInventory().getContainerSize(); i++) { ItemStack s = bot.getInventory().getItem(i); if (RunLoot.runOf(s) != null) marked += s.getCount(); }
+                shown = 0;
+                List<String> names = new ArrayList<>();
+                for (int i = 0; i < com.ascensiondungeons.mc.TollMenu.SHOWN; i++) {
+                    ItemStack s = menu.getSlot(i).getItem();
+                    if (!s.isEmpty()) { shown += s.getCount(); names.add(s.getCount() + "x" + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(s.getItem()).getPath()); }
+                }
+                itemsBefore = totalItems();
+                int expected = Math.max(1, (int) Math.round(marked * 0.35));
+                AscensionDungeonsLog.LOG.info("DIVE-E2E toll screen: {} unbanked item(s), shows {} to lose {} (expected {}); pay button: {}", marked, shown, names, expected,
+                        menu.getSlot(com.ascensiondungeons.mc.TollMenu.PAY).getItem().getHoverName().getString());
+                // Before paying, try to take a shown item: nothing may move.
+                menu.clicked(0, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                menu.clicked(0, 0, net.minecraft.world.inventory.ClickType.QUICK_MOVE, bot);
+                return marked > 0 && shown == expected && totalItems() == itemsBefore && menu.getCarried().isEmpty();
+            }
+        }));
+        steps.add(new Step("run 2: paying the toll takes exactly the shown items" + (cobblemon ? " plus the hidden one" : "") + " and lets the player out", 100, new BooleanSupplier() {
+            boolean paid;
+            @Override public boolean getAsBoolean() {
+                if (!paid) {
+                    if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.TollMenu menu)) return false;
+                    menu.clicked(com.ascensiondungeons.mc.TollMenu.PAY, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                    paid = true;
+                    return false;
+                }
+                if (bot.level() != server.overworld()) return false;
+                int[] c = count();
+                boolean heldOk = !cobblemon || Party.secondIsEmpty();
+                AscensionDungeonsLog.LOG.info("DIVE-E2E after the toll: {} item(s) (had {}, toll showed {}), {} still marked", totalItems(), itemsBefore, shown, c[1]);
+                return totalItems() == itemsBefore - shown && c[1] == 0 && heldOk;
+            }
+        }));
+        steps.add(new Step("the tolled player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
+        addRun(manager, "run 3");
+        steps.add(new Step("run 3: loot a chest", 100, new BooleanSupplier() {
+            boolean used;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                if (!used) { for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY); use(features("CHEST").get(0)); used = true; return false; }
+                if (!takeAll()) return false;
+                itemsBefore = totalItems();
+                return count()[1] > 0;
+            }
+        }));
+        steps.add(new Step("run 3: challenging calls out a tough gatekeeper" + (cobblemon ? " from the boss pool" : ""), 200, new BooleanSupplier() {
+            boolean moved, clicked;
+            @Override public boolean getAsBoolean() {
+                OutbreakDive d = dive();
+                if (!moved) { Vec3 p = d.portalCentre(); bot.teleportTo((ServerLevel) bot.level(), p.x, p.y, p.z, 0f, 0f); moved = true; return false; }
+                if (!clicked) {
+                    if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.TollMenu menu)) return false;
+                    menu.clicked(com.ascensiondungeons.mc.TollMenu.FIGHT, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                    clicked = true;
+                    return false;
+                }
+                Mob g = d.gatekeeperMob();
+                if (g == null) return false;
+                // A gatekeeper is tough: a 12-point hit must cost it far less than 12.
+                float before = g.getHealth();
+                g.invulnerableTime = 0;
+                g.hurt(g.level().damageSources().generic(), 12f);
+                float lost = before - g.getHealth();
+                AscensionDungeonsLog.LOG.info("DIVE-E2E gatekeeper: {} ({}) health {} of {}, toughness x{}, a 12-point hit cost it {} | {}", g.getName().getString(),
+                        g.getClass().getSimpleName(), g.getHealth(), g.getMaxHealth(), d.toughness(g), lost, d.describe());
+                boolean tough = cobblemon ? d.toughness(g) >= 6.0 && lost > 0 && lost <= 12f / 5f : g.getMaxHealth() >= 100;
+                return tough && (!cobblemon || g.getClass().getName().contains("PokemonEntity"));
+            }
+        }));
+        steps.add(new Step("run 3: beating the gatekeeper opens the portal and the player leaves with everything", 400, new BooleanSupplier() {
+            boolean killed;
+            @Override public boolean getAsBoolean() {
+                OutbreakDive d = dive();
+                if (d != null) {
+                    if (!killed) { Mob g = d.gatekeeperMob(); if (g != null) { g.kill(); killed = true; } }
+                    return false;
+                }
+                int[] c = count();
+                AscensionDungeonsLog.LOG.info("DIVE-E2E after beating the gatekeeper: {} item(s) (had {}), {} marked", totalItems(), itemsBefore, c[1]);
+                return killed && bot.level() == server.overworld() && totalItems() == itemsBefore && c[1] == 0;
+            }
         }));
         steps.add(new Step("the extracted player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
     }
@@ -273,6 +358,14 @@ public final class DiveE2E {
             AscensionDungeonsLog.LOG.info("DIVE-E2E {}", d.describe());
             return true;
         }));
+    }
+
+    private static int shown, itemsBefore;
+
+    private static int totalItems() {
+        int n = 0;
+        for (int i = 0; i < bot.getInventory().getContainerSize(); i++) n += bot.getInventory().getItem(i).getCount();
+        return n;
     }
 
     private static String describeInventory() {
@@ -326,6 +419,8 @@ public final class DiveE2E {
             second.swapHeldItem(marked, false, false);
             return RunLoot.runOf(second.heldItem()) != null;
         }
+
+        static boolean secondIsEmpty() { return ((com.cobblemon.mod.common.pokemon.Pokemon) secondPokemon).heldItem().isEmpty(); }
 
         /** The first Pokémon still holds its banked item; the second lost the unbanked one. */
         static boolean afterKnockOut() {

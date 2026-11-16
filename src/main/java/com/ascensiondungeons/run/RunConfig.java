@@ -17,6 +17,8 @@ public final class RunConfig {
     public int cinderforgeDurationTicks = 25 * 60 * 20;
     /** Clock for authored type dungeons (default 25 minutes). */
     public int authoredDurationTicks = 25 * 60 * 20;
+    /** Clock for Outbreak dives when the dungeon's outbreak.json does not set durationMinutes (default 45 minutes). */
+    public int diveDurationTicks = 45 * 60 * 20;
     /** How long the final raid may take once the exploration clock ended. */
     public int bossPhaseTicks = 15 * 60 * 20;
     public int maxPartySize = 4;
@@ -66,6 +68,7 @@ public final class RunConfig {
         if (durationTicks < 20) throw new IllegalStateException("durationTicks must be at least 20");
         if (cinderforgeDurationTicks < 20) throw new IllegalStateException("cinderforgeDurationTicks must be at least 20");
         if (authoredDurationTicks < 20) throw new IllegalStateException("authoredDurationTicks must be at least 20");
+        if (diveDurationTicks < 20) throw new IllegalStateException("diveDurationTicks must be at least 20");
         if (bossPhaseTicks < 20) throw new IllegalStateException("bossPhaseTicks must be at least 20");
         if (maxPartySize < 1) throw new IllegalStateException("maxPartySize must be at least 1");
         if (maxConcurrentRuns < 1) throw new IllegalStateException("maxConcurrentRuns must be at least 1");

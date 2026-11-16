@@ -56,6 +56,22 @@ public final class Haul {
         l.unbanked.clear();
     }
 
+    /** Wins the player has earned and not banked. */
+    public int unbankedWins(UUID player) {
+        Ledger l = ledgers.get(player);
+        return l == null ? 0 : l.unbanked.getOrDefault(Kind.ARENA_WIN, 0);
+    }
+
+    /** Takes wins from the unbanked part of a player's haul (the extraction toll). Returns how many were taken. */
+    public int forfeitWins(UUID player, int wins) {
+        Ledger l = ledgers.get(player);
+        if (l == null || wins <= 0) return 0;
+        int have = l.unbanked.getOrDefault(Kind.ARENA_WIN, 0);
+        int taken = Math.min(have, wins);
+        l.unbanked.put(Kind.ARENA_WIN, have - taken);
+        return taken;
+    }
+
     /** What the player is owed for leaving the run this way. Does not change the ledger: the caller records the payout once. */
     public Settlement settle(UUID player, Exit exit) {
         Ledger l = ledgers.get(player);
