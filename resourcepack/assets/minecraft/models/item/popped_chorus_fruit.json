@@ -1,0 +1,74 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "minecraft:item/popped_chorus_fruit"
+  },
+  "overrides": [
+    {
+      "predicate": {
+        "custom_model_data": 9101
+      },
+      "model": "ascensiondungeons:chest/common"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9102
+      },
+      "model": "ascensiondungeons:chest/uncommon"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9103
+      },
+      "model": "ascensiondungeons:chest/rare"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9104
+      },
+      "model": "ascensiondungeons:chest/epic"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9105
+      },
+      "model": "ascensiondungeons:chest/timer_sealed"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9106
+      },
+      "model": "ascensiondungeons:chest/timer_open"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9107
+      },
+      "model": "ascensiondungeons:chest/strongbox"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9111
+      },
+      "model": "ascensiondungeons:chest/outbreak_common"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9112
+      },
+      "model": "ascensiondungeons:chest/outbreak_uncommon"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9113
+      },
+      "model": "ascensiondungeons:chest/outbreak_rare"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9114
+      },
+      "model": "ascensiondungeons:chest/outbreak_epic"
+    }
+  ]
+}

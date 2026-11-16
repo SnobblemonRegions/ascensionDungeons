@@ -103,6 +103,8 @@ public final class OutbreakDive {
         ChestRarity shown;
         String shownText;
         Display.TextDisplay label;
+        Display.ItemDisplay model;
+        int shownModel;
         Feature(FeaturePlanner.Placement p, BlockPos pos) { this.kind = p.kind(); this.rarity = p.rarity(); this.pos = pos; this.shown = p.rarity(); }
     }
 
@@ -710,7 +712,9 @@ public final class OutbreakDive {
                 }
                 default -> { text = f.rarity.label() + " Chest"; colour = f.rarity.colour(); }
             }
-            label(f, text, colour);
+            boolean sealed = f.kind == FeaturePlanner.Kind.TIMER_CHEST && stage() < timerStage;
+            ChestRarity look = f.kind == FeaturePlanner.Kind.OUTBREAK_CHEST ? outbreakRarity(f) : f.rarity;
+            displays(f, text, colour, f.rarity == null ? 0 : com.ascensiondungeons.outbreak.ChestLook.model(f.kind, look, sealed));
             if (f.kind != FeaturePlanner.Kind.PORTAL && !(f.kind == FeaturePlanner.Kind.ALTAR && f.used)) {
                 Vector3f rgb = new Vector3f(((colour >> 16) & 255) / 255f, ((colour >> 8) & 255) / 255f, (colour & 255) / 255f);
                 level.sendParticles(new DustParticleOptions(rgb, 1.0f), f.pos.getX() + 0.5, f.pos.getY() + 1.1, f.pos.getZ() + 0.5, 3, 0.3, 0.2, 0.3, 0);
@@ -718,24 +722,51 @@ public final class OutbreakDive {
         }
     }
 
-    private void label(Feature f, String text, int colour) {
+    /**
+     * The floating label of a feature and, when the dungeon turns models on, the chest model shown over the real chest.
+     * The model is an item display of {@link com.ascensiondungeons.outbreak.ChestLook#DISPLAY_ITEM} with a custom-model number;
+     * players need the resource pack for it, so it is off unless {@code features.models} is true.
+     */
+    private void displays(Feature f, String text, int colour, int modelId) {
         ServerLevel level = host.level();
-        if (f.label == null || f.label.isRemoved()) {
-            // The chunk may have been unloaded and reloaded: drop any label left there before making a new one.
+        boolean models = modelId != 0 && Jx.b(Jx.o(cfg, "features"), "models", false);
+        if (f.label == null || f.label.isRemoved() || (models && (f.model == null || f.model.isRemoved()))) {
+            // The chunk may have been unloaded and reloaded: drop whatever was left there before making new ones.
             for (Display old : level.getEntitiesOfClass(Display.class, new AABB(f.pos).inflate(1.5, 3, 1.5), d -> d.getTags().contains(LABEL_TAG))) old.discard();
             Display.TextDisplay d = EntityType.TEXT_DISPLAY.create(level);
             if (d == null) return;
-            d.moveTo(f.pos.getX() + 0.5, f.pos.getY() + (f.kind == FeaturePlanner.Kind.PORTAL ? 2.6 : 1.5), f.pos.getZ() + 0.5);
+            d.moveTo(f.pos.getX() + 0.5, f.pos.getY() + (f.kind == FeaturePlanner.Kind.PORTAL ? 2.6 : 1.6), f.pos.getZ() + 0.5);
             d.setBillboardConstraints(Display.BillboardConstraints.CENTER);
             d.setViewRange(0.6f);
             d.addTag(LABEL_TAG);
             level.addFreshEntity(d);
             f.label = d;
             f.shownText = null;
+            f.model = null;
+            if (models) {
+                Display.ItemDisplay m = EntityType.ITEM_DISPLAY.create(level);
+                if (m != null) {
+                    // An item display turns its model half a turn; the entity is turned back so the chest's front faces north, like the block.
+                    m.moveTo(f.pos.getX() + 0.5, f.pos.getY() + 0.5, f.pos.getZ() + 0.5, 180f, 0f);
+                    m.setItemTransform(net.minecraft.world.item.ItemDisplayContext.NONE);
+                    m.setViewRange(0.8f);
+                    m.addTag(LABEL_TAG);
+                    level.addFreshEntity(m);
+                    f.model = m;
+                    f.shownModel = 0;
+                }
+            }
         }
         if (!text.equals(f.shownText)) {
             f.label.setText(Component.literal(text).withStyle(st -> st.withColor(TextColor.fromRgb(colour))));
             f.shownText = text;
+        }
+        if (models && f.model != null && f.shownModel != modelId) {
+            net.minecraft.world.item.ItemStack stack = new net.minecraft.world.item.ItemStack(
+                    net.minecraft.core.registries.BuiltInRegistries.ITEM.get(ResourceLocation.parse(com.ascensiondungeons.outbreak.ChestLook.DISPLAY_ITEM)));
+            stack.set(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA, new net.minecraft.world.item.component.CustomModelData(modelId));
+            f.model.setItemStack(stack);
+            f.shownModel = modelId;
         }
     }
 
