@@ -23,7 +23,8 @@ public final class ChestLook {
             case OUTBREAK_CHEST -> OUTBREAK_BASE + rarity.ordinal();
             case TIMER_CHEST -> sealed ? TIMER_SEALED : TIMER_OPEN;
             case STRONGBOX -> STRONGBOX;
-            case ALTAR, PORTAL, DESCENT, RETURN -> 0;
+            case NEST_CHEST, HOARD -> sealed ? TIMER_SEALED : rarity.modelId();
+            case ALTAR, PORTAL, DESCENT, RETURN, NEST -> 0;
         };
     }
 }

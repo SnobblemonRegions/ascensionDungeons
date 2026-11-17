@@ -46,8 +46,12 @@ public final class Depths {
         }
     }
 
-    /** One room. {@code min}/{@code max} bound its cell's interior; {@code cells} are places a creature or a chest can stand. */
-    public record Room(String id, Kind kind, int gx, int gz, int[] min, int[] max, List<int[]> cells, int doors) {}
+    /**
+     * One room. {@code min}/{@code max} bound its cell's interior; {@code cells} are places a creature or a chest can stand.
+     * {@code depth} is how many rooms a party passes through to reach it from the entrance room, by the shortest way (0 for
+     * the entrance room itself).
+     */
+    public record Room(String id, Kind kind, int gx, int gz, int[] min, int[] max, List<int[]> cells, int doors, int depth) {}
 
     private final Params params;
     private final int sizeX, sizeZ;
@@ -55,6 +59,7 @@ public final class Depths {
     private final List<Room> rooms = new ArrayList<>();
     private int[] entrance;
     private int passages;
+    private int maxDepth;
 
     private Depths(Params params) {
         this.params = params;
@@ -71,6 +76,8 @@ public final class Depths {
     public int[] entrance() { return entrance; }
     /** How many passages join the rooms (rooms - 1 would be a tree; more means loops). */
     public int passages() { return passages; }
+    /** The depth of the farthest room. */
+    public int maxDepth() { return maxDepth; }
 
     /** The role at a block; anything outside the slab is wall. */
     public byte role(int x, int y, int z) {
@@ -165,6 +172,19 @@ public final class Depths {
             }
         }
         d.passages = edges.size();
+        // How far each room is from the entrance, through the passages, by the shortest way.
+        int[] depth = new int[w * h];
+        java.util.Arrays.fill(depth, -1);
+        depth[start] = 0;
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        queue.add(start);
+        while (!queue.isEmpty()) {
+            int at = queue.poll();
+            for (int[] e : edges) {
+                int other = e[0] == at ? e[1] : e[1] == at ? e[0] : -1;
+                if (other >= 0 && depth[other] < 0) { depth[other] = depth[at] + 1; queue.add(other); }
+            }
+        }
         int[] degree = new int[w * h];
         for (int[] e : edges) { degree[e[0]]++; degree[e[1]]++; }
         // 3. Shapes. Dead ends make good vaults; the entrance is always an open hall.
@@ -218,7 +238,8 @@ public final class Depths {
             Collections.shuffle(cells, new Random(seed * 31 + c));
             if (cells.size() > 90) cells = new ArrayList<>(cells.subList(0, 90));
             d.rooms.add(new Room("D" + (gx + 1) + "_" + (gz + 1), kinds[c], gx, gz, new int[] {x0 + 1, 0, z0 + 1},
-                    new int[] {x0 + p.cell() - 2, HEIGHT - 1, z0 + p.cell() - 2}, List.copyOf(cells), degree[c]));
+                    new int[] {x0 + p.cell() - 2, HEIGHT - 1, z0 + p.cell() - 2}, List.copyOf(cells), degree[c], Math.max(0, depth[c])));
+            d.maxDepth = Math.max(d.maxDepth, depth[c]);
         }
         return d;
     }

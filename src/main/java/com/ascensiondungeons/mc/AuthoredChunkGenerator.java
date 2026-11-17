@@ -240,11 +240,15 @@ public final class AuthoredChunkGenerator extends ChunkGenerator {
                 case PORTAL -> level.setBlock(pos.below(), state("minecraft:lodestone"), 2);
                 case DESCENT, RETURN -> level.setBlock(pos.below(), state("minecraft:chiseled_deepslate"), 2);
                 case ALTAR -> level.setBlock(pos, state("minecraft:crying_obsidian"), 2);
+                // A nest's heart: a block no tool breaks, on a ring of the dungeon's accent so it reads as a place.
+                case NEST -> level.setBlock(pos, state("minecraft:reinforced_deepslate"), 2);
                 default -> {
                     // The floor under a chest shows its rarity even without a resource pack.
                     String floor = switch (f.kind()) {
                         case STRONGBOX -> "minecraft:netherite_block";
                         case TIMER_CHEST -> "minecraft:gold_block";
+                        case NEST_CHEST -> "minecraft:copper_block";
+                        case HOARD -> "minecraft:netherite_block";
                         default -> f.rarity().floorBlock();
                     };
                     level.setBlock(pos.below(), state(floor), 2);

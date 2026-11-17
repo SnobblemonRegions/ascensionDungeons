@@ -248,7 +248,12 @@ async function confirmPay(bot, since) {
     const deep = chests.slice(2).filter(c => c.depths).sort((a, b) => far(a) - far(b));
     await cmd(bot, `/tp @s ${mouth.x} ${mouth.y} ${mouth.z}`, 2500);       // start at the tunnel's mouth, in the entrance room
     let nb = bot.bars.length;
-    const down = await walkTo(bot, deep[0].x, deep[0].y, deep[0].z, 2);
+    // The walk proves the way down: through the tunnel and down the stairway to the maze's doorway. Deeper rooms are a fight at
+    // twelve times speed (nests, hazard rooms, a full Outbreak), which is the dungeon working, not the way down failing.
+    // Six blocks past the doorway, along the way the tunnel runs, is inside the maze's first room.
+    const along = Math.abs(door.z - mouth.z) > Math.abs(door.x - mouth.x) ? [0, Math.sign(door.z - mouth.z)] : [Math.sign(door.x - mouth.x), 0];
+    const inside = { x: door.x + 6 * along[0], y: door.y, z: door.z + 6 * along[1] };
+    const down = await walkTo(bot, inside.x, inside.y, inside.z, 1);
     check('A the player walks through the tunnel and down the stairway into the Depths, with no teleport',
       down.ok && down.forced <= 3 && down.jump < 2 && down.drop >= 8 && bot.bars.slice(nb).some(b => /descend into the Depths/.test(b)),
       JSON.stringify(down));
@@ -257,6 +262,7 @@ async function confirmPay(bot, since) {
     const after5 = await inv(bot);
     // count items, not stacks: new loot of a kind already carried merges into the stack that is there
     check('A a chest down in the Depths gives marked loot', opened && after5.markedTotal > before5.markedTotal, `${deep.length} unopened rarity chests are in the Depths`);
+    await cmd(bot, `/tp @s ${door.x} ${door.y} ${door.z}`, 2500);           // back to the doorway, to walk up from the bottom of the stairs
     nb = bot.bars.length;
     const up = await walkTo(bot, mouth.x, mouth.y, mouth.z, 1);
     check('A the player walks back up the stairway to the entrance room, with no teleport', up.ok && up.forced <= 3 && up.jump < 2 && bot.bars.slice(nb).some(b => /climb back/.test(b)), JSON.stringify(up));
@@ -290,7 +296,7 @@ async function confirmPay(bot, since) {
     r = await cmd(bot, '/dungeon tutorial', 1000);
     const recapA = bot.log.slice(n5).filter(l => /^Dive recap|^  (You extracted|Outbreak: stage|Kept: |Tip: )/.test(l)).map(l => l.trim());
     check('A the dive ends with a recap: how it ended, the stage, what was kept and lost, and a tip', recapA.length === 5 && recapA[0] === 'Dive recap: The Drowned Reservoir'
-      && recapA[1] === 'You extracted free: your first extraction cost nothing.' && /^Outbreak: stage \d \(.+\) after \d+m \d\ds\. Chests opened: \d+\.$/.test(recapA[2])
+      && recapA[1] === 'You extracted free: your first extraction cost nothing.' && /^Outbreak: stage \d \(.+\) after \d+m \d\ds\. Chests opened: \d+(\. Deepest: The [A-Za-z ]+)?(\. Nests and Alphas beaten: \d+)?\.$/.test(recapA[2])
       && /^Kept: \d+ items?, \d+ wins?\. Lost: 0 items, 0 wins\.$/.test(recapA[3]) && /^Tip: /.test(recapA[4]), recapA.join(' | '));
     check('A the free extraction is explained, finishes the tutorial and is used up', bot.log.some(l => /Guide: Extracted/.test(l)) && bot.log.some(l => /Your first extraction was free/.test(l))
       && bot.titles.some(t => /Extracted/.test(t)) && /Dive tutorial: finished/.test(r) && /extractions 1/.test(r) && /First extraction: used/.test(r), r);

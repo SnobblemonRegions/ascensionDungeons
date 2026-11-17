@@ -96,7 +96,19 @@ public final class Onboarding {
         FIRST_KNOCK_OUT(Weight.HEADLINE, true, "Knocked out",
                 "This was your first knock-out, so you kept half of what you had not banked. From now on a knock-out takes all of it.",
                 "What you banked, and everything you brought with you, is always safe.",
-                "Next time, bank at checkpoints and leave through the portal before the Outbreak outgrows you.");
+                "Next time, bank at checkpoints and leave through the portal before the Outbreak outgrows you."),
+        NEST(Weight.TIP, false, "Outbreak Nest",
+                "A nest wakes when you come near and sends waves at you until it is cleared.",
+                "Clear it and its sealed cache opens, and everyone nearby earns a win. Walk away and it goes back to sleep."),
+        ALPHA(Weight.TIP, false, "An Alpha",
+                "A champion guards this hoard. The chest stays sealed until the Alpha falls.",
+                "It holds its ground: pick your moment, and bring friends."),
+        HAZARD(Weight.TIP, true, "A hazard room",
+                "This room casts the dungeon's spells on its own. Watch the floor for rings and step out of them.",
+                "It holds a lucky chest for anyone who braves it."),
+        DEEPER(Weight.TIP, false, "Deeper is richer",
+                "The further a room is from the stairway, the better its chests and the fiercer its enemies.",
+                "The name of the band you are in shows on screen as you cross into it.");
 
         /** Added to the portal's lesson for a player whose first extraction is still to come. */
         public static final String FIRST_IS_FREE = "Your first extraction is free: this once, the toll takes nothing.";

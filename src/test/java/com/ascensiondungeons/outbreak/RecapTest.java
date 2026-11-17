@@ -96,4 +96,19 @@ class RecapTest {
             }
         }
     }
+
+    @Test
+    void theRecapSaysHowDeepThePlayerGotAndWhatTheyBeat() {
+        Facts deep = new Facts(Way.GATEKEEPER, 3, "Swarming", 600, 7, true, 20, 0, 4, 0, true, null, false, 35, false, "The Abyssal Cistern", 2, 2);
+        List<String> lines = Recap.lines("The Drowned Reservoir", deep);
+        assertEquals("Outbreak: stage 3 (Swarming) after 10m 00s. Chests opened: 7. Deepest: The Abyssal Cistern. Nests and Alphas beaten: 2.", lines.get(2));
+        // never reached the deep band: push further
+        Facts shallow = new Facts(Way.GATEKEEPER, 1, "Restless", 300, 3, true, 9, 0, 1, 0, false, null, false, 35, false, "The Sunken Halls", 0, 0);
+        assertTrue(Recap.tip(shallow).contains("never reached the deepest band"));
+        // reached it but beat nothing there: the sealed chests
+        Facts timid = new Facts(Way.CLEARED, 2, "Agitated", 300, 3, true, 9, 0, 1, 0, false, null, false, 35, false, "The Abyssal Cistern", 2, 0);
+        assertTrue(Recap.tip(timid).contains("Nests and Alphas"));
+        // the old form still reads as before
+        assertEquals("Outbreak: stage 2 (Agitated) after 12m 34s. Chests opened: 4.", Recap.lines("X", facts(Way.TOLL, 2, 4, true, 3, 1, 0, 0, false, null, false)).get(2));
+    }
 }

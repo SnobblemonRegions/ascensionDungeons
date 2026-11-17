@@ -565,7 +565,7 @@ public final class DiveE2E {
             for (String line : chat) { if (line.startsWith("Dive recap:")) in = true; if (in && recap.size() < 5) recap.add(line.trim()); }
             AscensionDungeonsLog.LOG.info("DIVE-E2E recap after the knock-out: {}", recap);
             return recap.size() == 5 && recap.get(0).equals("Dive recap: The Drowned Reservoir") && recap.get(1).startsWith("You were knocked out")
-                    && recap.get(1).endsWith("It was your first, so you kept half of what was unbanked.") && recap.get(4).startsWith("Tip: Next time a knock-out takes everything unbanked.") && recap.get(2).matches("Outbreak: stage \\d \\(.+\\) after \\d+m \\d\\ds\\. Chests opened: \\d+\\.")
+                    && recap.get(1).endsWith("It was your first, so you kept half of what was unbanked.") && recap.get(4).startsWith("Tip: Next time a knock-out takes everything unbanked.") && recap.get(2).matches("Outbreak: stage \\d \\(.+\\) after \\d+m \\d\\ds\\. Chests opened: \\d+(\\. Deepest: The [A-Za-z ]+)?\\.")
                     && recap.get(3).matches("Kept: \\d+ items?, \\d+ wins?\\. Lost: \\d+ items?, \\d+ wins?\\.") && !recap.get(3).contains("Lost: 0 items") && recap.get(4).startsWith("Tip: ");
         }));
         steps.add(new Step("the knock-out is explained on screen and in chat, and the player is still being taught", 40, () -> {
@@ -736,9 +736,10 @@ public final class DiveE2E {
         steps.add(new Step("the extracted player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
         steps.add(new Step("the recap after beating the gatekeeper says everything was kept", 40, () ->
                 heard("You extracted past the gatekeeper and kept everything.") && heard("Lost: 0 items, 0 wins.") && heard("Tip: ")));
+        depthSteps(manager, "run 5");
         // A second knock-out is the ordinary one: everything unbanked goes.
-        addRun(manager, "run 5");
-        steps.add(new Step("run 5: loot a chest", 100, new BooleanSupplier() {
+        addRun(manager, "run 6");
+        steps.add(new Step("run 6: loot a chest", 100, new BooleanSupplier() {
             boolean used;
             @Override public boolean getAsBoolean() {
                 bot.setInvulnerable(true);
@@ -747,7 +748,7 @@ public final class DiveE2E {
                 return markedItems() > 0;
             }
         }));
-        steps.add(new Step("run 5: a second knock-out takes everything unbanked, and says so", 100, new BooleanSupplier() {
+        steps.add(new Step("run 6: a second knock-out takes everything unbanked, and says so", 100, new BooleanSupplier() {
             boolean hit; int unbanked;
             @Override public boolean getAsBoolean() {
                 if (!hit) {
@@ -767,8 +768,150 @@ public final class DiveE2E {
                         && recapNumber("Lost: ") == unbanked;
             }
         }));
-        steps.add(new Step("run 5: the player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
+        steps.add(new Step("run 6: the player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
         partySteps(server, manager, cobblemon);
+    }
+
+    /** A set piece of this dive, from the dive's own list: {kind, room, band, x, y, z, state}. */
+    private static String[] piece(String kind) {
+        for (String line : dive().pieceLines()) if (line.startsWith(kind + " ")) return line.split(" ");
+        throw new IllegalStateException("this dive has no " + kind);
+    }
+
+    private static void teleport(int x, int y, int z) { bot.teleportTo((ServerLevel) bot.level(), x + 0.5, y, z + 0.5, 0f, 0f); }
+
+    /** The Depths' bands and set pieces, in one dive: a band's name on screen, a nest cleared, an Alpha slain, a hazard room. */
+    private static void depthSteps(Supplier<RunManager> manager, String label) {
+        addRun(manager, label);
+        steps.add(new Step(label + ": the Depths hold two nests, two Alphas in the deep band, and three hazard rooms, with each nest's heart built in the world", 40, () -> {
+            List<String> lines = dive().pieceLines();
+            AscensionDungeonsLog.LOG.info("DIVE-E2E set pieces: {}", lines);
+            long nests = lines.stream().filter(l -> l.startsWith("NEST ")).count(), alphas = lines.stream().filter(l -> l.startsWith("ALPHA ")).count(),
+                    hazards = lines.stream().filter(l -> l.startsWith("HAZARD ")).count();
+            boolean deepAlphas = lines.stream().filter(l -> l.startsWith("ALPHA ")).allMatch(l -> l.split(" ")[2].equals("2"));
+            String[] n = piece("NEST");
+            var heart = bot.level().getBlockState(new BlockPos(Integer.parseInt(n[3]), Integer.parseInt(n[4]), Integer.parseInt(n[5])));
+            return nests == 2 && alphas == 2 && hazards == 3 && deepAlphas && heart.is(net.minecraft.world.level.block.Blocks.REINFORCED_DEEPSLATE);
+        }));
+        steps.add(new Step(label + ": crossing into the deep band puts its name on screen", 100, new BooleanSupplier() {
+            boolean moved;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                String[] a = piece("ALPHA");
+                if (!moved) { titles.clear(); teleport(Integer.parseInt(a[3]) + 9, Integer.parseInt(a[4]), Integer.parseInt(a[5])); moved = true; return false; }
+                AscensionDungeonsLog.LOG.info("DIVE-E2E band: now {}, deepest {}, titles {}", dive().bandOf(ID), dive().deepestBand(ID), titles);
+                return dive().bandOf(ID) == 2 && titles.contains("The Abyssal Cistern");
+            }
+        }));
+        steps.add(new Step(label + ": the Alpha's hoard is sealed, the Alpha takes its post as the player comes near, and slaying it opens the hoard", 600, new BooleanSupplier() {
+            int phase;
+            int[] hoard;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                bot.setHealth(bot.getMaxHealth());
+                String[] a = piece("ALPHA");
+                if (phase == 0) {
+                    // The hoard is the one nearest this Alpha's post.
+                    double best = Double.MAX_VALUE;
+                    for (String line : dive().featureLines()) {
+                        String[] f = line.split(" ");
+                        if (!f[0].equals("HOARD")) continue;
+                        int[] c = {Integer.parseInt(f[2]), Integer.parseInt(f[3]), Integer.parseInt(f[4])};
+                        double d = Math.hypot(c[0] - Integer.parseInt(a[3]), c[2] - Integer.parseInt(a[5]));
+                        if (d < best) { best = d; hoard = c; }
+                    }
+                    if (hoard == null) throw new IllegalStateException("no hoard beside the alpha");
+                    chat.clear();
+                    use(hoard);
+                    phase = 1;
+                    return false;
+                }
+                if (phase == 1) {
+                    if (bot.containerMenu != bot.inventoryMenu) throw new IllegalStateException("a sealed hoard opened");
+                    List<Mob> alpha = dive().pieceMobs(a[1]);
+                    if (alpha.isEmpty()) return false;
+                    Mob m = alpha.get(0);
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E alpha: {} health {} of {} ({})", m.getName().getString(), m.getHealth(), m.getMaxHealth(), m.getClass().getSimpleName());
+                    if (!m.getName().getString().startsWith("Alpha ") || !m.hasGlowingTag()) throw new IllegalStateException("not an alpha: " + m.getName().getString());
+                    m.kill();
+                    phase = 2;
+                    return false;
+                }
+                if (phase == 2) {
+                    if (!piece("ALPHA")[6].equals("SLAIN") && !String.join(" ", piece("ALPHA")).endsWith("done")) return false;
+                    if (!heard("has fallen! Its hoard is unsealed.") || !heard("A win is added to your haul.")) return false;
+                    for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
+                    use(hoard);
+                    phase = 3;
+                    return false;
+                }
+                if (!takeAll()) return false;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E hoard: {}", describeInventory());
+                return markedItems() > 0;
+            }
+        }));
+        steps.add(new Step(label + ": an Outbreak Nest wakes when the player comes near, sends its waves one after another, and opens its cache when cleared", 2400, new BooleanSupplier() {
+            boolean moved, opened;
+            int lastWave;
+            int[] cache;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                bot.setHealth(bot.getMaxHealth());
+                String[] n = piece("NEST");
+                if (!moved) {
+                    for (String line : dive().featureLines()) {
+                        String[] f = line.split(" ");
+                        if (f[0].equals("NEST_CHEST")) {
+                            int[] c = {Integer.parseInt(f[2]), Integer.parseInt(f[3]), Integer.parseInt(f[4])};
+                            if (Math.abs(c[0] - Integer.parseInt(n[3])) < 24 && Math.abs(c[2] - Integer.parseInt(n[5])) < 24) cache = c;
+                        }
+                    }
+                    chat.clear();
+                    titles.clear();
+                    teleport(Integer.parseInt(n[3]) + 3, Integer.parseInt(n[4]), Integer.parseInt(n[5]));
+                    moved = true;
+                    return false;
+                }
+                String state = piece("NEST")[6];
+                if (state.startsWith("AWAKE")) {
+                    int wave = Integer.parseInt(state.split("/")[1]);
+                    if (wave != lastWave) { AscensionDungeonsLog.LOG.info("DIVE-E2E nest wave {}: {} enemies", wave, dive().pieceMobs(n[1]).size()); lastWave = wave; }
+                    // Stand in for the fight: the wave's enemies fall, a few at a time.
+                    for (Mob m : dive().pieceMobs(n[1])) { if (bot.server.getTickCount() % 10 == 0) { m.kill(); break; } }
+                    return false;
+                }
+                if (!state.startsWith("CLEARED")) return false;
+                if (!opened) {
+                    if (!titles.contains("The Nest wakes") || !titles.contains("Nest cleared") || lastWave < 2 || !heard("The Outbreak Nest is cleared!")) throw new IllegalStateException("the nest was not run as it should be: " + titles + " wave " + lastWave);
+                    for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
+                    use(cache);
+                    opened = true;
+                    return false;
+                }
+                if (!takeAll()) return false;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E nest cache: {}", describeInventory());
+                return markedItems() > 0;
+            }
+        }));
+        steps.add(new Step(label + ": a hazard room casts the dungeon's spells at a player inside it", 900, new BooleanSupplier() {
+            boolean moved;
+            int before;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                bot.setHealth(bot.getMaxHealth());
+                String[] h = piece("HAZARD");
+                if (!moved) { before = dive().hazardPulses(); teleport(Integer.parseInt(h[3]), Integer.parseInt(h[4]), Integer.parseInt(h[5])); moved = true; return false; }
+                return dive().hazardPulses() > before;
+            }
+        }));
+        steps.add(new Step(label + ": walking out, the recap names the deepest band and the set pieces beaten", 200, new BooleanSupplier() {
+            boolean left;
+            @Override public boolean getAsBoolean() {
+                if (!left) { chat.clear(); manager.get().leave(ID); left = true; return false; }
+                if (manager.get().runOf(ID).isPresent()) return false;
+                return heard("Deepest: The Abyssal Cistern") && heard("Nests and Alphas beaten: 2");
+            }
+        }));
     }
 
     private static boolean heard2(String text) { for (String line : chat2) if (line.contains(text)) return true; return false; }
@@ -963,6 +1106,24 @@ public final class DiveE2E {
         for (String type : com.ascensiondungeons.gen.authored.AuthoredDungeons.ids()) {
             if (com.ascensiondungeons.gen.authored.AuthoredLayout.get(type).outbreak() == null) continue;
             addRun(manager, type, type);
+            steps.add(new Step(type + ": the Depths hold its set pieces, each nest's heart is built, and every Alpha is in the deep band", 40, () -> {
+                List<String> lines = dive().pieceLines();
+                int nests = 0, alphas = 0, hazards = 0;
+                for (String line : lines) {
+                    String[] f = line.split(" ");
+                    switch (f[0]) {
+                        case "NEST" -> {
+                            nests++;
+                            if (!bot.level().getBlockState(new BlockPos(Integer.parseInt(f[3]), Integer.parseInt(f[4]), Integer.parseInt(f[5]))).is(net.minecraft.world.level.block.Blocks.REINFORCED_DEEPSLATE)) return false;
+                        }
+                        case "ALPHA" -> { alphas++; if (!f[2].equals("2")) return false; }
+                        case "HAZARD" -> hazards++;
+                        default -> { }
+                    }
+                }
+                AscensionDungeonsLog.LOG.info("DIVE-E2E {} set pieces: {}", type, lines);
+                return nests == 2 && alphas == 2 && hazards == 3;
+            }));
             steps.add(new Step(type + ": a wave of " + (cobblemon ? "Pokémon " : "") + "enemies spawns", 1200, () -> {
                 bot.setInvulnerable(true);
                 List<Mob> mobs = dive().enemyMobs();

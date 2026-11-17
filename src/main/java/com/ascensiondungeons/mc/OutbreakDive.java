@@ -5,6 +5,8 @@ import com.ascensiondungeons.gen.authored.AuthoredLayout;
 import com.ascensiondungeons.gen.authored.Jx;
 import com.ascensiondungeons.outbreak.Aggro;
 import com.ascensiondungeons.outbreak.ChestRarity;
+import com.ascensiondungeons.outbreak.DepthBands;
+import com.ascensiondungeons.outbreak.SetPieces;
 import com.ascensiondungeons.outbreak.DiveSettlement;
 import com.ascensiondungeons.outbreak.ExtractionPortal;
 import com.ascensiondungeons.outbreak.FeaturePlanner;
@@ -169,6 +171,46 @@ public final class OutbreakDive {
     private final Set<UUID> knockedOutBySpell = new HashSet<>();
     /** True while the run is ending around the players still inside. */
     private boolean closing;
+    // ---- the Depths: bands and set pieces ----
+    /** The band each player is in now (-1 upstairs), and the deepest band each has reached. */
+    private final Map<UUID, Integer> bandNow = new HashMap<>(), deepestBand = new HashMap<>();
+    /** Set pieces each player was near when they were cleared. */
+    private final Map<UUID, Integer> conquered = new HashMap<>();
+    private final List<PieceState> pieces = new ArrayList<>();
+    private int hazardPulses;
+    /** A set piece's sealed chest, by where it stands. */
+    private final Map<BlockPos, PieceState> sealedChests = new HashMap<>();
+
+    /** A set piece as it runs: a nest's fight, an Alpha and its bar, a hazard room's next pulse. */
+    private final class PieceState {
+        final SetPieces.Piece piece;
+        final Vec3 centre;
+        final AuthoredLayout.Room room;
+        final BlockPos reward;
+        final SetPieces.Nest nest;
+        final Set<UUID> spawned = new HashSet<>();
+        Mob alpha;
+        ServerBossEvent bar;
+        boolean done;
+        long nextPulse;
+        Spell pulse;
+        Vec3 pulseAt;
+        long landsAt = -1;
+        Display.TextDisplay label;
+        String shownText;
+        PieceState(SetPieces.Piece piece) {
+            this.piece = piece;
+            this.centre = Vec3.atBottomCenterOf(host.world(piece.centre()));
+            this.room = roomOf(centre);
+            this.reward = host.world(piece.reward());
+            this.nest = piece.kind() == SetPieces.Kind.NEST ? new SetPieces.Nest(SetPieces.nestWaves(piece.band()), ticks(30)) : null;
+        }
+        int alive() {
+            int n = 0;
+            for (UUID id : spawned) { Enemy en = enemies.get(id); if (en != null && en.mob.isAlive()) n++; }
+            return n;
+        }
+    }
     private Vec3 portalCentre;
     /** The teleporting stairway to detached Depths and the spot it leads to (both null when the Depths are joined by a tunnel, or absent). */
     private Vec3 descentCentre, returnCentre;
@@ -273,6 +315,11 @@ public final class OutbreakDive {
         }
         if (portalCentre == null) throw new IllegalStateException("no room for an extraction portal");
         for (Feature f : features.values()) f.deep = AuthoredLayout.inDepths(roomOf(Vec3.atBottomCenterOf(f.pos)));
+        for (SetPieces.Piece piece : host.layout().setPieces(host.run().seed())) {
+            PieceState state = new PieceState(piece);
+            pieces.add(state);
+            if (piece.kind() != SetPieces.Kind.HAZARD) sealedChests.put(state.reward, state);
+        }
         coach = new DiveCoach(host.level(), tunnelMouth != null || descentCentre != null, tollPercent, firstFree, firstSofter, this::guideTarget);
         outbreakBar = new ServerBossEvent(Component.literal("Outbreak"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.NOTCHED_6);
     }
@@ -378,6 +425,7 @@ public final class OutbreakDive {
         stairwayTick(players);
         if (tunnelMouth != null && now % 10 == 0) depthsTick(players);
         if (now % 10 == 0) lessonsTick(players);
+        piecesTick(players);
         coach.tick(now, unsettled(players));
 
         if (!bossDown && !players.isEmpty() && now >= nextWaveAt) {
@@ -419,11 +467,28 @@ public final class OutbreakDive {
             AuthoredLayout.Room room = host.layout().roomAt(host.run().seed(), c[0], c[1], c[2]);
             if (room == null) continue;                                   // in the tunnel, on the stairway or between rooms: no change
             boolean deep = AuthoredLayout.inDepths(room);
+            int band = deep ? host.layout().band(host.run().seed(), room) : -1;
+            Integer was = bandNow.put(id, band);
+            if (deep && (was == null || was != band)) bandEntered(p, band, was == null ? -1 : was);
             if (deep == below.contains(id)) continue;
             if (deep) { below.add(id); everBelow.add(id); } else below.remove(id);
             if (deep) { coach.notice(p, Onboarding.Lesson.DEPTHS, now); coach.enteredDepths(p); }
             p.displayClientMessage(Component.literal(deep ? "You descend into the Depths." : "You climb back to the dungeon.").withStyle(ChatFormatting.AQUA), true);
         }
+    }
+
+    /** A player crossed into a band of the Depths: its name across the screen, and a word on what it means. */
+    private void bandEntered(ServerPlayer p, int band, int was) {
+        UUID id = p.getUUID();
+        deepestBand.merge(id, band, Math::max);
+        String name = DepthBands.name(host.layout().id(), band);
+        String sub = DepthBands.label(band) + (band > was ? (band == DepthBands.OUTER ? " · the first rooms" : band == DepthBands.MIDDLE ? " · richer chests, fiercer foes" : " · the best chests, the worst foes")
+                : " · back toward the stairway");
+        p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket(8, 40, 12));
+        p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket(Component.literal(sub).withStyle(ChatFormatting.GRAY)));
+        p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket(Component.literal(name).withStyle(band >= 2 ? ChatFormatting.DARK_PURPLE : band == 1 ? ChatFormatting.GOLD : ChatFormatting.AQUA)));
+        if (band > was) p.playNotifySound(SoundEvents.AMBIENT_CAVE.value(), SoundSource.AMBIENT, 0.6f, 1.0f - 0.15f * band);
+        if (band >= DepthBands.MIDDLE) coach.notice(p, Onboarding.Lesson.DEEPER, now);
     }
 
     private List<ServerPlayer> unsettled(List<ServerPlayer> players) {
@@ -463,7 +528,9 @@ public final class OutbreakDive {
                     case ALTAR -> Onboarding.Lesson.ALTAR;
                     case PORTAL -> Onboarding.Lesson.PORTAL;
                     case DESCENT -> Onboarding.Lesson.TUNNEL;
-                    case RETURN -> null;
+                    case NEST -> Onboarding.Lesson.NEST;
+                    case HOARD -> Onboarding.Lesson.ALPHA;
+                    case RETURN, NEST_CHEST -> null;
                 };
                 // The way out is explained when it matters: once the player is carrying something they could lose.
                 if (lesson == Onboarding.Lesson.PORTAL && !looted.containsKey(p.getUUID())) continue;
@@ -510,6 +577,8 @@ public final class OutbreakDive {
         for (Feature f : features.values()) {
             if (f.rarity == null || f.deep != deep || f.kind == FeaturePlanner.Kind.STRONGBOX) continue;
             if (f.kind == FeaturePlanner.Kind.TIMER_CHEST && stage() < timerStage) continue;
+            PieceState holder = sealedChests.get(f.pos);
+            if (holder != null && !holder.done) continue;
             if (fresh && mine.contains(f.pos)) continue;
             double d = p.blockPosition().distSqr(f.pos);
             if (d < bestD) { bestD = d; best = f; }
@@ -520,6 +589,12 @@ public final class OutbreakDive {
     private void stageRose(int stage) {
         String name = STAGE_NAMES[Math.min(stage, STAGE_NAMES.length - 1)];
         host.say("The Outbreak grows: stage " + stage + ", " + name + ". Surviving it adds to your haul.", ChatFormatting.GOLD);
+        for (ServerPlayer p : unsettled(host.players())) {
+            p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket(6, 30, 10));
+            p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket(Component.literal("The Outbreak grows").withStyle(ChatFormatting.GRAY)));
+            p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket(Component.literal("Stage " + stage + ": " + name)
+                    .withStyle(stage <= 1 ? ChatFormatting.GREEN : stage == 2 ? ChatFormatting.YELLOW : stage <= 4 ? ChatFormatting.RED : ChatFormatting.DARK_PURPLE)));
+        }
         haul.addShared(present(), Haul.Kind.ARENA_WIN, 1);
         for (ServerPlayer p : unsettled(host.players())) coach.notice(p, Onboarding.Lesson.STAGE, now);
         host.zoneTier(tier());
@@ -737,7 +812,9 @@ public final class OutbreakDive {
             recap(online, new Recap.Facts(way, stage, STAGE_NAMES[Math.min(stage, STAGE_NAMES.length - 1)], Math.max(0, now - startedAt) / 20,
                     looted.getOrDefault(player, Set.of()).size(), everBelow.contains(player), bankedItems.getOrDefault(player, 0) + (kept ? carried : 0),
                     tollItems.getOrDefault(player, 0) + (kept ? 0 : carried), s.arenaWins(), tollWins.getOrDefault(player, 0) + (kept ? 0 : unbankedWins),
-                    everBanked.contains(player), knockedOutBy.get(player), knockedOutBySpell.contains(player), tollPercent, softened.contains(player)));
+                    everBanked.contains(player), knockedOutBy.get(player), knockedOutBySpell.contains(player), tollPercent, softened.contains(player),
+                    deepestBand.containsKey(player) ? DepthBands.name(host.layout().id(), deepestBand.get(player)) : null, deepestBand.getOrDefault(player, -1),
+                    conquered.getOrDefault(player, 0)));
         }
         AscensionDungeonsLog.LOG.info("[dive] run {} settled {} exit={} arenaWins={} boss={} chests={} tier={} loot {} {} stack(s){}", runId(), player, exit,
                 s.arenaWins(), s.bossDefeated(), s.chests(), tier, kept ? "kept" : "stripped", stacks, online == null ? " (offline: swept on next login)" : "");
@@ -767,6 +844,7 @@ public final class OutbreakDive {
         closed = true;
         portal.close();
         outbreakBar.removeAllPlayers();
+        for (PieceState ps : pieces) if (ps.bar != null) ps.bar.removeAllPlayers();
         for (ServerBossEvent bar : portalBars.values()) bar.removeAllPlayers();
         portalBars.clear();
         portalTexts.clear();
@@ -775,18 +853,29 @@ public final class OutbreakDive {
 
     // ---- enemies ---------------------------------------------------------------------------------------------
 
-    private void spawnWave(int count, List<ServerPlayer> players, com.google.gson.JsonArray defs, Vec3 around) {
+    private void spawnWave(int count, List<ServerPlayer> players, com.google.gson.JsonArray defs, Vec3 around) { spawnWave(count, players, defs, around, around == null); }
+
+    /**
+     * @param regular an ordinary Outbreak wave: in a deeper band it brings more enemies. Every wave's enemies are tougher in
+     *                deeper bands (more elites, higher levels).
+     * @return the enemies that were placed
+     */
+    private List<Mob> spawnWave(int count, List<ServerPlayer> players, com.google.gson.JsonArray defs, Vec3 around, boolean regular) {
+        List<Mob> out = new ArrayList<>();
         Random rng = host.random();
         int stage = stage();
         List<JsonObject> eligible = new ArrayList<>();
         for (JsonElement e : defs) if (Jx.i(e.getAsJsonObject(), "minStage", 0) <= stage) eligible.add(e.getAsJsonObject());
-        if (eligible.isEmpty() || players.isEmpty()) return;
+        if (eligible.isEmpty() || players.isEmpty()) return out;
         ServerPlayer focus = players.get(rng.nextInt(players.size()));
         Vec3 centre = around != null ? around : focus.position();
         int[] sc = host.schem(focus);
         AuthoredLayout.Room room = around != null ? roomOf(around) : host.layout().roomAt(host.run().seed(), sc[0], sc[1], sc[2]);
         if (room == null || room.spawnCells.length == 0) room = nearestRoom(centre);
-        if (room == null) return;
+        if (room == null) return out;
+        int band = host.layout().band(host.run().seed(), room);
+        // A deeper band adds to an ordinary wave, but never past the cap on enemies alive.
+        if (regular) count = Math.min(count + DepthBands.extraEnemies(band), Math.max(0, waves.maxAlive() - enemies.size()));
         JsonObject elite = Jx.o(cfg, "elite");
         int placed = 0;
         for (int tries = 0; tries < count * 16 && placed < count; tries++) {
@@ -797,7 +886,11 @@ public final class OutbreakDive {
             for (ServerPlayer p : players) if (p.position().distanceToSqr(pos) < 8 * 8) { tooClose = true; break; }
             if (tooClose) continue;
             JsonObject def = eligible.get(rng.nextInt(eligible.size()));
-            boolean isElite = rng.nextDouble() < params.eliteChance(stage);
+            if (DepthBands.levelBonus(band) > 0) {
+                def = def.deepCopy();
+                def.addProperty("levelBonus", Jx.i(def, "levelBonus", 0) + DepthBands.levelBonus(band));
+            }
+            boolean isElite = rng.nextDouble() < params.eliteChance(stage) + DepthBands.eliteBonus(band);
             Mob mob = host.spawn(def, cell, 1.0);
             if (mob == null) continue;
             String spellId = Jx.s(def, "spell", null);
@@ -812,9 +905,11 @@ public final class OutbreakDive {
             }
             Aggro.Style style = Aggro.Style.parse(Jx.s(def, "style", null), Aggro.Style.HUNTER);
             register(mob, style, isElite, spells.get(spellId));
+            out.add(mob);
             placed++;
         }
-        if (placed > 0) AscensionDungeonsLog.LOG.info("[dive] run {} wave: {} enemies at stage {} in {}", runId(), placed, stage, room.id);
+        if (placed > 0) AscensionDungeonsLog.LOG.info("[dive] run {} wave: {} enemies at stage {} in {} (band {})", runId(), placed, stage, room.id, band);
+        return out;
     }
 
     /** The room with a standing cell closest to this point: for a player in a doorway or corridor between rooms. */
@@ -877,7 +972,7 @@ public final class OutbreakDive {
             if (!players.isEmpty()) {
                 boolean near = false;
                 for (ServerPlayer p : players) if (p.distanceToSqr(en.mob) < LET_GO * LET_GO) { near = true; break; }
-                if (!near && en.mob != gatekeeper) { en.mob.discard(); it.remove(); continue; }
+                if (!near && en.mob != gatekeeper && !isAlpha(en.mob)) { en.mob.discard(); it.remove(); continue; }
             }
             if (host.combatManaged(en.mob)) continue;
             Aggro.Decision d = decide(en, targets);
@@ -917,6 +1012,7 @@ public final class OutbreakDive {
         if (closed || !(e instanceof Mob mob)) return;
         enemies.remove(mob.getUUID());
         toughness.remove(mob.getUUID());
+        for (PieceState ps : pieces) if (ps.alpha == mob && !ps.done) { pieceCleared(ps, mob.getName().getString() + " has fallen! Its hoard is unsealed."); return; }
         if (mob != gatekeeper) return;
         gatekeeper = null;
         portal.gatekeeperDefeated(now);
@@ -1177,9 +1273,10 @@ public final class OutbreakDive {
         }
     }
 
-    private void land(Enemy en, List<ServerPlayer> players) {
-        Spell s = en.spell;
-        Vec3 c = en.castCentre;
+    private void land(Enemy en, List<ServerPlayer> players) { land(en.spell, en.castCentre, en.mob.getName().getString(), players); }
+
+    /** A spell lands: the burst, and its hit and effect on every player in the ring. {@code caster} names it in a recap. */
+    private void land(Spell s, Vec3 c, String caster, List<ServerPlayer> players) {
         ServerLevel level = host.level();
         level.sendParticles(new DustParticleOptions(rgb(spellColours.getOrDefault(s.id(), 0x33D9FF)), 1.6f), c.x, c.y + 0.4, c.z, 90, s.radius() / 2, 0.4, s.radius() / 2, 0.1);
         level.sendParticles(ParticleTypes.POOF, c.x, c.y + 0.3, c.z, 20, s.radius() / 2, 0.2, s.radius() / 2, 0.02);
@@ -1188,7 +1285,7 @@ public final class OutbreakDive {
             double dx = p.getX() - c.x, dz = p.getZ() - c.z;
             if (dx * dx + dz * dz > s.radius() * s.radius() || Math.abs(p.getY() - c.y) > 3 || p.isCreative()) continue;
             // Remembered before the hit lands: if this one knocks the player out, the recap names it.
-            lastSpell.put(p.getUUID(), s.name() + " (" + en.mob.getName().getString() + ")");
+            lastSpell.put(p.getUUID(), s.name() + " (" + caster + ")");
             lastSpellAt.put(p.getUUID(), now);
             if (s.damage() > 0) p.hurt(level.damageSources().magic(), (float) s.damage());
             if (!p.isAlive() || settled.contains(p.getUUID())) continue;
@@ -1217,6 +1314,183 @@ public final class OutbreakDive {
         }
     }
 
+    // ---- the Depths' set pieces ------------------------------------------------------------------------------
+
+    private boolean isAlpha(Mob mob) { for (PieceState ps : pieces) if (ps.alpha == mob) return true; return false; }
+
+    private PieceState pieceAt(BlockPos centre) {
+        for (PieceState ps : pieces) if (ps.piece.kind() == SetPieces.Kind.NEST && host.world(ps.piece.centre()).equals(centre)) return ps;
+        return null;
+    }
+
+    /** Players close enough to a set piece to take part: within this many blocks of its heart and on its floor. */
+    private List<ServerPlayer> around(PieceState ps, List<ServerPlayer> players, double reach) {
+        List<ServerPlayer> out = new ArrayList<>();
+        for (ServerPlayer p : players)
+            if (!settled.contains(p.getUUID()) && Math.abs(p.getY() - ps.centre.y) < 6 && p.position().distanceToSqr(ps.centre) < reach * reach) out.add(p);
+        return out;
+    }
+
+    private void piecesTick(List<ServerPlayer> players) {
+        List<ServerPlayer> live = unsettled(players);
+        for (PieceState ps : pieces) {
+            if (ps.done && ps.piece.kind() != SetPieces.Kind.HAZARD) continue;
+            switch (ps.piece.kind()) {
+                case NEST -> { if (now % 10 == 0) nestTick(ps, live); }
+                case ALPHA -> { if (now % 10 == 0) alphaTick(ps, live); }
+                case HAZARD -> hazardTick(ps, live);
+            }
+        }
+    }
+
+    private void nestTick(PieceState ps, List<ServerPlayer> players) {
+        List<ServerPlayer> near = around(ps, players, 14);
+        SetPieces.Nest.Action action = ps.nest.tick(now, !near.isEmpty(), ps.alive());
+        switch (action) {
+            case WAKE, SPAWN_WAVE -> {
+                if (action == SetPieces.Nest.Action.WAKE) {
+                    for (ServerPlayer p : near) {
+                        p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket(5, 30, 10));
+                        p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket(Component.literal("Clear " + ps.nest.waves() + " waves to open its cache").withStyle(ChatFormatting.GRAY)));
+                        p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket(Component.literal("The Nest wakes").withStyle(ChatFormatting.DARK_RED)));
+                    }
+                    sound(BlockPos.containing(ps.centre), SoundEvents.WARDEN_EMERGE, 0.6f, 1.4f);
+                }
+                for (ServerPlayer p : near) p.displayClientMessage(Component.literal("Outbreak Nest: wave " + ps.nest.wave() + " of " + ps.nest.waves()).withStyle(ChatFormatting.RED), true);
+                host.level().sendParticles(ParticleTypes.SCULK_SOUL, ps.centre.x, ps.centre.y + 1, ps.centre.z, 40, 0.8, 0.8, 0.8, 0.05);
+                int size = SetPieces.nestWaveSize(ps.nest.wave(), ps.piece.band(), near.size());
+                for (Mob m : spawnWave(size, near, Jx.a(Jx.o(cfg, "waves"), "spawns"), ps.centre, false)) ps.spawned.add(m.getUUID());
+                // A wave that could not be placed must not stall the nest: it counts as beaten.
+                AscensionDungeonsLog.LOG.info("[dive] run {} nest in {} wave {} of {}: {} enemies", runId(), ps.piece.room(), ps.nest.wave(), ps.nest.waves(), ps.alive());
+            }
+            case SLEEP -> {
+                for (UUID id : ps.spawned) { Enemy en = enemies.remove(id); if (en != null) en.mob.discard(); }
+                ps.spawned.clear();
+                AscensionDungeonsLog.LOG.info("[dive] run {} nest in {} went back to sleep", runId(), ps.piece.room());
+            }
+            case CLEARED -> pieceCleared(ps, "The Outbreak Nest is cleared! Its cache is unsealed.");
+            case NONE -> { }
+        }
+    }
+
+    private void alphaTick(PieceState ps, List<ServerPlayer> players) {
+        if (ps.alpha == null) {
+            List<ServerPlayer> near = around(ps, players, 18);
+            if (near.isEmpty()) return;
+            ps.alpha = spawnAlpha(ps, near.size());
+            if (ps.alpha == null) return;
+            for (ServerPlayer p : near) p.displayClientMessage(Component.literal(ps.alpha.getName().getString() + " guards this hoard!").withStyle(ChatFormatting.GOLD), true);
+            sound(BlockPos.containing(ps.centre), SoundEvents.RAVAGER_ROAR, 0.8f, 0.8f);
+        }
+        if (!ps.alpha.isAlive()) return;
+        // Its own bar, for anyone close enough to be fighting it.
+        if (ps.bar == null) ps.bar = new ServerBossEvent(ps.alpha.getName().copy(), BossEvent.BossBarColor.YELLOW, BossEvent.BossBarOverlay.NOTCHED_10);
+        ps.bar.setProgress(Math.max(0f, Math.min(1f, ps.alpha.getHealth() / ps.alpha.getMaxHealth())));
+        List<ServerPlayer> near = around(ps, players, 28);
+        for (ServerPlayer p : near) ps.bar.addPlayer(p);
+        for (ServerPlayer p : new ArrayList<>(ps.bar.getPlayers())) if (!near.contains(p)) ps.bar.removePlayer(p);
+    }
+
+    /** An Alpha: a creature from the dungeon's stronger pool, grown with its band and the Outbreak, holding its post. */
+    private Mob spawnAlpha(PieceState ps, int players) {
+        JsonObject g = Jx.o(cfg, "guardians");
+        if (g == null) return null;
+        JsonObject def = g.deepCopy();
+        def.remove("name");                       // an Alpha goes by its own kind ("Alpha Dewott", "Alpha Drowned"), not the guardians' label
+        JsonObject pools = Jx.o(host.layout().data().pokemon, "pools");
+        if (pools != null && pools.has("trial")) def.addProperty("pokemon", "trial");
+        int stage = stage();
+        def.addProperty("levelBonus", DepthBands.levelBonus(ps.piece.band()) + 2 * stage);
+        Mob mob = host.spawn(def, ps.piece.centre(), 1.0);
+        if (mob == null) return null;
+        double health = SetPieces.alphaHealth(ps.piece.band(), stage) * (1 + 0.5 * Math.max(0, players - 1));
+        scale(mob, health * (host.combatManaged(mob) ? host.healthFactor() : 1.0), SetPieces.alphaDamage(ps.piece.band(), stage));
+        mob.setGlowingTag(true);
+        String base = mob.hasCustomName() ? mob.getCustomName().getString() : mob.getName().getString();
+        mob.setCustomName(Component.literal("Alpha " + base).withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+        mob.setCustomNameVisible(true);
+        com.google.gson.JsonArray pool = Jx.a(Jx.o(cfg, "elite"), "spells");
+        Spell spell = pool.size() == 0 ? null : spells.get(pool.get(host.random().nextInt(pool.size())).getAsString());
+        register(mob, Aggro.Style.GUARDIAN, true, spell);
+        AscensionDungeonsLog.LOG.info("[dive] run {} alpha {} in {} (band {}): health x{}", runId(), mob.getName().getString(), ps.piece.room(), ps.piece.band(), String.format("%.1f", health));
+        return mob;
+    }
+
+    /** A hazard room: while anyone is in it, the room casts one of the dungeon's spells near one of them, on a timer. */
+    private void hazardTick(PieceState ps, List<ServerPlayer> players) {
+        if (ps.landsAt >= 0) {
+            if (now < ps.landsAt) {
+                if (now % 4 == 0) ring(ps.pulseAt, ps.pulse.radius(), new DustParticleOptions(rgb(spellColours.getOrDefault(ps.pulse.id(), 0x33D9FF)), 1.2f));
+                return;
+            }
+            land(ps.pulse, ps.pulseAt, "the room", players);
+            ps.landsAt = -1;
+            hazardPulses++;
+            return;
+        }
+        if (now % 10 != 0 || now < ps.nextPulse || spells.isEmpty()) return;
+        List<ServerPlayer> inside = new ArrayList<>();
+        for (ServerPlayer p : players) if (ps.room != null && roomOf(p.position()) == ps.room) inside.add(p);
+        if (inside.isEmpty()) return;
+        for (ServerPlayer p : inside) coach.notice(p, Onboarding.Lesson.HAZARD, now);
+        ServerPlayer target = inside.get(host.random().nextInt(inside.size()));
+        List<Spell> all = new ArrayList<>(spells.values());
+        ps.pulse = all.get(host.random().nextInt(all.size()));
+        ps.pulseAt = target.position();
+        ps.landsAt = now + Math.max(20, ps.pulse.warnTicks());
+        ps.nextPulse = now + SetPieces.hazardPeriod(ticks(8), stage());
+        for (ServerPlayer p : inside) p.displayClientMessage(Component.literal("The room casts " + ps.pulse.name() + "!").withStyle(ChatFormatting.AQUA), true);
+    }
+
+    /** A nest cleared or an Alpha slain: the sealed chest opens, and everyone close by earns a win. */
+    private void pieceCleared(PieceState ps, String message) {
+        ps.done = true;
+        if (ps.bar != null) { ps.bar.removeAllPlayers(); ps.bar = null; }
+        List<ServerPlayer> near = around(ps, unsettled(host.players()), 40);
+        List<UUID> ids = new ArrayList<>();
+        for (ServerPlayer p : near) { ids.add(p.getUUID()); conquered.merge(p.getUUID(), 1, Integer::sum); }
+        haul.addShared(ids, Haul.Kind.ARENA_WIN, 1);
+        for (ServerPlayer p : near) {
+            p.sendSystemMessage(Component.literal(message + " A win is added to your haul.").withStyle(ChatFormatting.GREEN));
+            p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitlesAnimationPacket(5, 40, 10));
+            p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetSubtitleTextPacket(Component.literal(ps.piece.kind() == SetPieces.Kind.NEST ? "Its cache is open" : "Its hoard is open").withStyle(ChatFormatting.GRAY)));
+            p.connection.send(new net.minecraft.network.protocol.game.ClientboundSetTitleTextPacket(Component.literal(ps.piece.kind() == SetPieces.Kind.NEST ? "Nest cleared" : "Alpha slain").withStyle(ChatFormatting.GREEN)));
+        }
+        Vec3 r = Vec3.atCenterOf(ps.reward);
+        host.level().sendParticles(ParticleTypes.TOTEM_OF_UNDYING, r.x, r.y + 0.6, r.z, 60, 0.4, 0.6, 0.4, 0.3);
+        sound(ps.reward, SoundEvents.PLAYER_LEVELUP, 0.9f, 1.2f);
+        AscensionDungeonsLog.LOG.info("[dive] run {} {} in {} cleared by {} player(s)", runId(), ps.piece.kind(), ps.piece.room(), near.size());
+    }
+
+    /** Test aid: one line per set piece, "KIND room band x y z state". */
+    public List<String> pieceLines() {
+        List<String> out = new ArrayList<>();
+        for (PieceState ps : pieces) {
+            BlockPos c = host.world(ps.piece.centre());
+            String state = ps.nest != null ? ps.nest.state() + "/" + ps.nest.wave() : ps.piece.kind() == SetPieces.Kind.ALPHA ? (ps.done ? "SLAIN" : ps.alpha == null ? "WAITING" : "GUARDING") : "ACTIVE";
+            out.add(ps.piece.kind() + " " + ps.piece.room() + " " + ps.piece.band() + " " + c.getX() + " " + c.getY() + " " + c.getZ() + " " + state + (ps.done ? " done" : ""));
+        }
+        return out;
+    }
+
+    /** Test aid: the living enemies a set piece spawned (a nest's waves, or its Alpha). */
+    public List<Mob> pieceMobs(String room) {
+        List<Mob> out = new ArrayList<>();
+        for (PieceState ps : pieces) {
+            if (!ps.piece.room().equals(room)) continue;
+            for (UUID id : ps.spawned) { Enemy en = enemies.get(id); if (en != null && en.mob.isAlive()) out.add(en.mob); }
+            if (ps.alpha != null && ps.alpha.isAlive()) out.add(ps.alpha);
+        }
+        return out;
+    }
+
+    /** Test aid: how many times a hazard room's spell has landed. */
+    public int hazardPulses() { return hazardPulses; }
+
+    /** Test aid: the band a player last crossed into (-1 upstairs), and the deepest they reached. */
+    public int bandOf(UUID player) { return bandNow.getOrDefault(player, -1); }
+    public int deepestBand(UUID player) { return deepestBand.getOrDefault(player, -1); }
+
     // ---- chests, altars and the portal -----------------------------------------------------------------------
 
     /**
@@ -1227,6 +1501,16 @@ public final class OutbreakDive {
         Feature f = features.get(pos);
         if (f == null || closed) return null;
         JsonObject fc = Jx.o(cfg, "features");
+        PieceState sealed = sealedChests.get(pos);
+        if (sealed != null && !sealed.done) {
+            if (mainHand) p.displayClientMessage(Component.literal(sealed.piece.kind() == SetPieces.Kind.NEST ? "Sealed until the Outbreak Nest is cleared." : "Sealed until the Alpha falls.")
+                    .withStyle(ChatFormatting.YELLOW), true);
+            return InteractionResult.FAIL;
+        }
+        if (f.kind == FeaturePlanner.Kind.NEST) {
+            if (mainHand) p.displayClientMessage(Component.literal("Nothing breaks the nest's heart. Clear its waves.").withStyle(ChatFormatting.YELLOW), true);
+            return InteractionResult.FAIL;
+        }
         switch (f.kind) {
             case ALTAR -> {
                 if (!mainHand) return InteractionResult.FAIL;
@@ -1326,9 +1610,29 @@ public final class OutbreakDive {
                     colour = r.colour();
                     f.shown = r;
                 }
+                case NEST -> {
+                    PieceState ps = pieceAt(f.pos);
+                    SetPieces.Nest n = ps == null ? null : ps.nest;
+                    text = n == null ? "Outbreak Nest" : switch (n.state()) {
+                        case DORMANT -> "Outbreak Nest: dormant";
+                        case AWAKE -> "Outbreak Nest: wave " + n.wave() + " of " + n.waves();
+                        case CLEARED -> "Outbreak Nest (cleared)";
+                    };
+                    colour = n != null && n.state() == SetPieces.Nest.State.CLEARED ? 0x777777 : 0xC0306A;
+                    if (n != null && n.state() != SetPieces.Nest.State.CLEARED)
+                        level.sendParticles(n.state() == SetPieces.Nest.State.AWAKE ? ParticleTypes.SCULK_SOUL : ParticleTypes.SMOKE, f.pos.getX() + 0.5, f.pos.getY() + 1.2, f.pos.getZ() + 0.5, 6, 0.3, 0.4, 0.3, 0.01);
+                }
+                case NEST_CHEST, HOARD -> {
+                    PieceState ps = sealedChests.get(f.pos);
+                    boolean shut = ps != null && !ps.done;
+                    String what = f.kind == FeaturePlanner.Kind.NEST_CHEST ? "Nest Cache" : "Alpha's Hoard";
+                    text = shut ? what + ": sealed" : f.rarity.label() + " " + what;
+                    colour = shut ? 0xFFD437 : f.rarity.colour();
+                }
                 default -> { text = f.rarity.label() + " Chest"; colour = f.rarity.colour(); }
             }
-            boolean sealed = f.kind == FeaturePlanner.Kind.TIMER_CHEST && stage() < timerStage;
+            PieceState holder = sealedChests.get(f.pos);
+            boolean sealed = (f.kind == FeaturePlanner.Kind.TIMER_CHEST && stage() < timerStage) || (holder != null && !holder.done);
             ChestRarity look = f.kind == FeaturePlanner.Kind.OUTBREAK_CHEST ? outbreakRarity(f) : f.rarity;
             displays(f, text, colour, f.rarity == null ? 0 : com.ascensiondungeons.outbreak.ChestLook.model(f.kind, look, sealed));
             if (f.rarity != null || (f.kind == FeaturePlanner.Kind.ALTAR && !f.used)) {

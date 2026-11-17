@@ -62,6 +62,20 @@ _Avoid_: basement, lower level, procedural wing.
 
 **Tunnel**: The opening cut through a wall of the entrance room that leads to the stairway. In the same place every run.
 
+**Band**: How deep a room of the Depths is: Outer, Middle or Deep, by how many rooms lie between it and the doorway. Each dungeon names its own. Deeper bands hold more and better chests and fiercer enemies.
+_Avoid_: level, floor, tier (a tier is AscensionLib's zone tier).
+
+**Set piece**: A placed encounter in the Depths: an Outbreak Nest, an Alpha, or a hazard room.
+_Avoid_: event, encounter (an authored dungeon's encounters are its own).
+
+**Outbreak Nest**: A set piece that wakes when a player comes near, sends waves until cleared, and opens its sealed Nest Cache.
+_Avoid_: spawner (nothing spawns from the block itself).
+
+**Alpha**: A champion set piece guarding a sealed Alpha's Hoard. Not the gatekeeper and not an elite.
+_Avoid_: boss, champion, mini-boss.
+
+**Hazard room**: A set piece where the room itself casts the dungeon's spells at players inside.
+
 **Stairway**: The stairs from the tunnel down to the Depths' doorway. Players and enemies walk it; nothing teleports.
 _Avoid_: using it for the teleporting pads of **detached Depths**, the fallback when a dungeon has no safe wall to cut.
 

@@ -220,6 +220,7 @@ public final class AuthoredLayout {
                 depthsCache.remove(oldest);
                 depthRoomCache.remove(oldest);
                 featureCache.remove(oldest);
+                pieceCache.remove(oldest);
             }
         }
         return d;
@@ -397,6 +398,29 @@ public final class AuthoredLayout {
     }
 
     private final Map<Long, java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Placement>> featureCache = new HashMap<>();
+    private final Map<Long, java.util.List<com.ascensiondungeons.outbreak.SetPieces.Piece>> pieceCache = new HashMap<>();
+
+    /** This run's set pieces in the Depths (nests, alphas, hazard rooms); empty when the dungeon has none. */
+    public synchronized java.util.List<com.ascensiondungeons.outbreak.SetPieces.Piece> setPieces(long seed) {
+        features(seed);
+        return pieceCache.getOrDefault(seed, java.util.List.of());
+    }
+
+    /** The maze's own record of a Depths room, or null. */
+    public com.ascensiondungeons.gen.depths.Depths.Room depthsRoom(long seed, String id) {
+        com.ascensiondungeons.gen.depths.Depths d = depths(seed);
+        if (d == null) return null;
+        for (var r : d.rooms()) if (r.id().equals(id)) return r;
+        return null;
+    }
+
+    /** A room's {@link com.ascensiondungeons.outbreak.DepthBands depth band}: the hand-built dungeon is band 0. */
+    public int band(long seed, Room room) {
+        if (room == null || !inDepths(room)) return 0;
+        com.ascensiondungeons.gen.depths.Depths d = depths(seed);
+        var r = depthsRoom(seed, room.id);
+        return d == null || r == null ? 0 : com.ascensiondungeons.outbreak.DepthBands.band(r.depth(), d.maxDepth());
+    }
 
     /**
      * Where this run's Outbreak features go, from its seed: empty when the dungeon has no {@code outbreak.json}. The chunk
@@ -421,10 +445,15 @@ public final class AuthoredLayout {
             for (JsonElement b : data.bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));
             com.ascensiondungeons.gen.depths.Depths depths = depths(seed);
             java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Room> rooms = new java.util.ArrayList<>();
+            java.util.List<com.ascensiondungeons.outbreak.SetPieces.Room> deepRooms = new java.util.ArrayList<>();
             for (Room r : rooms(seed)) {
                 java.util.List<int[]> cells = new java.util.ArrayList<>();
                 if (!bossRooms.contains(r.id)) for (int[] c : r.spawnCells) if (open(depths, c) && !reserved(c, boxes, points)) cells.add(c);
-                rooms.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Room(r.id, cells));
+                int band = band(seed, r);
+                rooms.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Room(r.id, cells, band));
+                var shape = inDepths(r) ? depthsRoom(seed, r.id) : null;
+                if (shape != null && shape.kind() != com.ascensiondungeons.gen.depths.Depths.Kind.ENTRANCE)
+                    deepRooms.add(new com.ascensiondungeons.outbreak.SetPieces.Room(r.id, band, shape.kind() == com.ascensiondungeons.gen.depths.Depths.Kind.VAULT, cells));
             }
             int[] arrival = null;
             String arrivalRoom = null;
@@ -439,7 +468,31 @@ public final class AuthoredLayout {
             var counts = new com.ascensiondungeons.outbreak.FeaturePlanner.Counts(Jx.i(f, "chests", 4), Jx.i(f, "outbreakChests", 1),
                     Jx.i(f, "timerChests", 1), Jx.i(f, "strongboxes", 1), Jx.i(f, "altars", 1));
             Room home = entryRoom();
-            cached = java.util.List.copyOf(com.ascensiondungeons.outbreak.FeaturePlanner.plan(rooms, data.entry, home == null ? "" : home.id, counts, seed, arrival, arrivalRoom));
+            java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Placement> plan =
+                    new java.util.ArrayList<>(com.ascensiondungeons.outbreak.FeaturePlanner.plan(rooms, data.entry, home == null ? "" : home.id, counts, seed, arrival, arrivalRoom));
+            // The Depths' set pieces go in rooms of their own, after the ordinary features, keeping clear of them.
+            JsonObject sp = Jx.o(outbreak, "setPieces");
+            var pieceCounts = new com.ascensiondungeons.outbreak.SetPieces.Counts(Jx.i(sp, "nests", 2), Jx.i(sp, "alphas", 2), Jx.i(sp, "hazards", 3));
+            java.util.List<int[]> taken = new java.util.ArrayList<>();
+            for (var p : plan) taken.add(p.cell());
+            java.util.List<com.ascensiondungeons.outbreak.SetPieces.Piece> pieces = deepRooms.isEmpty() ? java.util.List.of()
+                    : java.util.List.copyOf(com.ascensiondungeons.outbreak.SetPieces.plan(deepRooms, pieceCounts, seed, taken));
+            java.util.Random luck = new java.util.Random(seed ^ 0x484f415244L);
+            for (var piece : pieces) {
+                switch (piece.kind()) {
+                    case NEST -> {
+                        plan.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Placement(com.ascensiondungeons.outbreak.FeaturePlanner.Kind.NEST, null, piece.room(), piece.centre()));
+                        plan.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Placement(com.ascensiondungeons.outbreak.FeaturePlanner.Kind.NEST_CHEST,
+                                piece.band() >= 2 ? com.ascensiondungeons.outbreak.ChestRarity.EPIC : com.ascensiondungeons.outbreak.ChestRarity.RARE, piece.room(), piece.reward()));
+                    }
+                    case ALPHA -> plan.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Placement(com.ascensiondungeons.outbreak.FeaturePlanner.Kind.HOARD,
+                            com.ascensiondungeons.outbreak.ChestRarity.EPIC, piece.room(), piece.reward()));
+                    case HAZARD -> plan.add(new com.ascensiondungeons.outbreak.FeaturePlanner.Placement(com.ascensiondungeons.outbreak.FeaturePlanner.Kind.CHEST,
+                            com.ascensiondungeons.outbreak.ChestRarity.roll(luck, 2 + com.ascensiondungeons.outbreak.DepthBands.chestLuck(piece.band())), piece.room(), piece.reward()));
+                }
+            }
+            pieceCache.put(seed, pieces);
+            cached = java.util.List.copyOf(plan);
             featureCache.put(seed, cached);
             return cached;
         }

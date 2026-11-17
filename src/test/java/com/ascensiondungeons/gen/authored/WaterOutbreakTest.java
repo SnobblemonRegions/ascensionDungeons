@@ -86,7 +86,10 @@ class WaterOutbreakTest {
             for (JsonElement b : layout.data().bosses) bossRooms.add(Jx.s(b.getAsJsonObject(), "room", ""));
             for (long seed = 1; seed <= 40; seed++) {
                 List<FeaturePlanner.Placement> plan = layout.features(seed);
-                assertEquals(wanted, plan.size(), id + " seed " + seed);
+                // and each set piece: a nest is its heart and its cache, an alpha its hoard, a hazard room its chest
+                int pieces = 0;
+                for (var piece : layout.setPieces(seed)) pieces += piece.kind() == com.ascensiondungeons.outbreak.SetPieces.Kind.NEST ? 2 : 1;
+                assertEquals(wanted + pieces, plan.size(), id + " seed " + seed);
                 var depths = layout.depths(seed);
                 int deep = 0;
                 for (FeaturePlanner.Placement p : plan) {
@@ -267,6 +270,48 @@ class WaterOutbreakTest {
             for (String s : steps) assertTrue(s.endsWith("_slab"), id + " " + s);
             assertEquals(steps.size(), new HashSet<>(steps).size(), id + ": no slab is listed twice");
         }
+    }
+
+    /** The point of the bands: further from the stairway is richer, in what is found and in how much of it. */
+    @Test
+    void deeperInTheDepthsIsRicherAndHoldsTheSetPieces() {
+        int[] chestsByBand = new int[3], roomsByBand = new int[3];
+        long[] raritySum = new long[3];
+        for (String id : TYPES) {
+            AuthoredLayout layout = AuthoredLayout.get(id);
+            for (long seed = 1; seed <= 20; seed++) {
+                var depths = layout.depths(seed);
+                assertTrue(depths.maxDepth() >= 5, id + " seed " + seed + ": a maze deep enough for three bands (" + depths.maxDepth() + ")");
+                java.util.Map<String, Integer> bandOf = new java.util.HashMap<>();
+                for (AuthoredLayout.Room r : layout.rooms(seed)) if (AuthoredLayout.inDepths(r)) { int b = layout.band(seed, r); bandOf.put(r.id, b); roomsByBand[b]++; }
+                for (FeaturePlanner.Placement p : layout.features(seed)) {
+                    Integer b = bandOf.get(p.room());
+                    if (b == null || p.kind() != FeaturePlanner.Kind.CHEST) continue;
+                    chestsByBand[b]++;
+                    raritySum[b] += p.rarity().ordinal();
+                }
+                var pieces = layout.setPieces(seed);
+                int nests = 0, alphas = 0, hazards = 0;
+                Set<String> rooms = new HashSet<>();
+                for (var piece : pieces) {
+                    assertTrue(rooms.add(piece.room()), id + " seed " + seed + ": one piece per room");
+                    assertEquals(bandOf.get(piece.room()).intValue(), piece.band(), id);
+                    switch (piece.kind()) {
+                        case NEST -> { nests++; assertTrue(piece.band() >= 1, id + ": a nest is past the outer band"); }
+                        case ALPHA -> { alphas++; assertEquals(2, piece.band(), id + " seed " + seed + ": alphas are in the deep band"); }
+                        case HAZARD -> hazards++;
+                    }
+                }
+                assertEquals(2, nests, id + " seed " + seed);
+                assertEquals(2, alphas, id + " seed " + seed);
+                assertEquals(3, hazards, id + " seed " + seed);
+            }
+        }
+        double[] perRoom = new double[3], rarity = new double[3];
+        for (int b = 0; b < 3; b++) { perRoom[b] = chestsByBand[b] / (double) roomsByBand[b]; rarity[b] = raritySum[b] / (double) chestsByBand[b]; }
+        System.out.println("chests per room by band " + java.util.Arrays.toString(perRoom) + ", mean rarity by band " + java.util.Arrays.toString(rarity));
+        assertTrue(perRoom[2] > perRoom[1] && perRoom[1] > perRoom[0], "more chests per room deeper: " + java.util.Arrays.toString(perRoom));
+        assertTrue(rarity[2] > rarity[1] && rarity[1] > rarity[0], "rarer chests deeper: " + java.util.Arrays.toString(rarity));
     }
 
     @Test

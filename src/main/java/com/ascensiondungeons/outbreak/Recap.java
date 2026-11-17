@@ -42,9 +42,18 @@ public final class Recap {
      * @param bySpell       whether that was a spell
      * @param tollPercent   the toll, for the tips that name it
      * @param softened      a knock-out that was the player's first, so they kept part of what was unbanked
+     * @param deepest       the name of the deepest band of the Depths they reached, or null
+     * @param deepestBand   that band (0 outer, 2 deep), or -1
+     * @param conquered     Outbreak Nests cleared and Alphas slain with them there
      */
     public record Facts(Way way, int stage, String stageName, long seconds, int chests, boolean reachedDepths, int itemsKept, int itemsLost, int winsKept, int winsLost,
-                        boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened) {}
+                        boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened, String deepest, int deepestBand, int conquered) {
+        /** Without the Depths' bands and set pieces, for callers that do not track them. */
+        public Facts(Way way, int stage, String stageName, long seconds, int chests, boolean reachedDepths, int itemsKept, int itemsLost, int winsKept, int winsLost,
+                     boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened) {
+            this(way, stage, stageName, seconds, chests, reachedDepths, itemsKept, itemsLost, winsKept, winsLost, everBanked, knockedOutBy, bySpell, tollPercent, softened, null, -1, 0);
+        }
+    }
 
     /** The recap, line by line: a heading, how it ended, the Outbreak, the tally, and a tip. */
     public static List<String> lines(String dungeon, Facts f) {
@@ -52,7 +61,8 @@ public final class Recap {
         out.add("Dive recap: " + dungeon);
         out.add(ended(f));
         out.add("Outbreak: stage " + f.stage() + " (" + f.stageName() + ") after " + clock(f.seconds()) + ". Chests opened: " + f.chests()
-                + (f.reachedDepths() ? "" : ". You did not go down to the Depths") + ".");
+                + (!f.reachedDepths() ? ". You did not go down to the Depths" : f.deepest() != null ? ". Deepest: " + f.deepest() : "")
+                + (f.conquered() > 0 ? ". Nests and Alphas beaten: " + f.conquered() : "") + ".");
         out.add("Kept: " + count(f.itemsKept(), "item") + ", " + count(f.winsKept(), "win") + ". Lost: " + count(f.itemsLost(), "item") + ", " + count(f.winsLost(), "win") + ".");
         out.add("Tip: " + tip(f));
         return out;
@@ -97,6 +107,8 @@ public final class Recap {
             }
             case GATEKEEPER, CLEARED -> {
                 if (!f.reachedDepths()) return "Most of a dungeon's chests are down in the Depths. Take the tunnel from the entrance room next time.";
+                if (f.deepestBand() >= 0 && f.deepestBand() < 2) return "You never reached the deepest band, where the best chests and the Alphas' hoards are. Push further next time.";
+                if (f.conquered() == 0 && f.deepestBand() >= 2) return "Outbreak Nests and Alphas guard sealed chests of Rare and Epic loot. Clear one next time.";
                 if (f.stage() >= 3) return "You got out with everything at stage " + f.stage() + ". A higher-tier dungeon pays more for the same risk.";
                 return "You kept everything. Staying a stage longer next time grows the haul, and the gatekeeper with it.";
             }

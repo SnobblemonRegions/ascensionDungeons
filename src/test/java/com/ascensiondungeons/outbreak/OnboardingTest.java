@@ -294,7 +294,7 @@ class OnboardingTest {
     void lessonsKeepTheirPlacesBecauseWhatWasHeardIsSavedByPosition() {
         // A new lesson goes at the end. If this fails, saved progress would point at the wrong lessons.
         String[] order = {"WELCOME", "OUTBREAK", "ENEMIES", "SPELLS", "CHESTS", "UNBANKED", "CHECKPOINT", "STAGE", "TUNNEL", "DEPTHS", "TIMER_CHEST", "OUTBREAK_CHEST",
-                "STRONGBOX", "ALTAR", "LOW_HEALTH", "TIME_SHORT", "PORTAL", "GATEKEEPER", "KNOCKED_OUT", "TOLL_PAID", "EXTRACTED", "FIRST_EXTRACTION", "FIRST_KNOCK_OUT"};
+                "STRONGBOX", "ALTAR", "LOW_HEALTH", "TIME_SHORT", "PORTAL", "GATEKEEPER", "KNOCKED_OUT", "TOLL_PAID", "EXTRACTED", "FIRST_EXTRACTION", "FIRST_KNOCK_OUT", "NEST", "ALPHA", "HAZARD", "DEEPER"};
         assertTrue(Lesson.values().length >= order.length);
         for (int i = 0; i < order.length; i++) assertEquals(order[i], Lesson.values()[i].name(), "position " + i);
     }

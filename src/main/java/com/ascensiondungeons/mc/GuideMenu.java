@@ -79,6 +79,10 @@ public final class GuideMenu extends ChestMenu {
             case EXTRACTED -> Items.ENDER_PEARL;
             case FIRST_EXTRACTION -> Items.LIME_CONCRETE;
             case FIRST_KNOCK_OUT -> Items.SHIELD;
+            case NEST -> Items.SCULK_CATALYST;
+            case ALPHA -> Items.GOLDEN_HELMET;
+            case HAZARD -> Items.MAGMA_CREAM;
+            case DEEPER -> Items.RECOVERY_COMPASS;
         };
     }
 

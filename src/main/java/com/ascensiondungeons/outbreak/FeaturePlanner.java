@@ -15,11 +15,22 @@ public final class FeaturePlanner {
         /** The stairway from the entrance room down to the Depths. */
         DESCENT,
         /** Where a party arrives in the Depths, and the way back up. */
-        RETURN
+        RETURN,
+        /** The heart of an Outbreak Nest (a set piece): nothing to open, it wakes when a player comes near. */
+        NEST,
+        /** A nest's reward: sealed until the nest is cleared. */
+        NEST_CHEST,
+        /** An Alpha's hoard: sealed until the Alpha falls. */
+        HOARD
     }
 
-    /** A room and the cells in it where something can stand. Cells are {x, y, z}. */
-    public record Room(String id, List<int[]> cells) {}
+    /**
+     * A room and the cells in it where something can stand. Cells are {x, y, z}. {@code band} is its {@link DepthBands depth
+     * band}: deeper rooms get luckier chests, and more of them.
+     */
+    public record Room(String id, List<int[]> cells, int band) {
+        public Room(String id, List<int[]> cells) { this(id, cells, 0); }
+    }
 
     public record Counts(int chests, int outbreakChests, int timerChests, int strongboxes, int altars) {
         public Counts {
@@ -84,11 +95,21 @@ public final class FeaturePlanner {
         // Strongboxes and timer chests are the prizes: never in the entry room when another room exists.
         List<Room> deep = new ArrayList<>(usable);
         if (deep.size() > 1 && home != null) deep.remove(home);
-        place(out, Kind.STRONGBOX, counts.strongboxes(), deep, entry, rng, 3);
-        place(out, Kind.TIMER_CHEST, counts.timerChests(), deep, entry, rng, 2);
-        place(out, Kind.OUTBREAK_CHEST, counts.outbreakChests(), deep, entry, rng, 0);
+        // Deeper rooms are offered more often, so more of the loot is further from the door.
+        place(out, Kind.STRONGBOX, counts.strongboxes(), weighted(deep), entry, rng, 3);
+        place(out, Kind.TIMER_CHEST, counts.timerChests(), weighted(deep), entry, rng, 2);
+        place(out, Kind.OUTBREAK_CHEST, counts.outbreakChests(), weighted(deep), entry, rng, 0);
         place(out, Kind.ALTAR, counts.altars(), deep, entry, rng, 0);
-        place(out, Kind.CHEST, counts.chests(), usable, entry, rng, 0);
+        place(out, Kind.CHEST, counts.chests(), weighted(usable), entry, rng, 0);
+        return out;
+    }
+
+    /** Each room as many times as its band's weight, interleaved so a round-robin still visits every room early. */
+    static List<Room> weighted(List<Room> rooms) {
+        int most = 1;
+        for (Room r : rooms) most = Math.max(most, DepthBands.chestWeight(r.band()));
+        List<Room> out = new ArrayList<>();
+        for (int pass = 0; pass < most; pass++) for (Room r : rooms) if (DepthBands.chestWeight(r.band()) > pass) out.add(r);
         return out;
     }
 
@@ -105,7 +126,7 @@ public final class FeaturePlanner {
                     ChestRarity rarity = kind == Kind.ALTAR ? null
                             : kind == Kind.STRONGBOX ? ChestRarity.EPIC
                             : kind == Kind.TIMER_CHEST ? ChestRarity.RARE
-                            : ChestRarity.roll(rng, luck);
+                            : ChestRarity.roll(rng, luck + DepthBands.chestLuck(room.band()));
                     out.add(new Placement(kind, rarity, room.id(), c));
                     placed = true;
                 }
