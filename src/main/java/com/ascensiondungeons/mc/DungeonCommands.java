@@ -130,7 +130,22 @@ public final class DungeonCommands {
                     if (s == null || s.dive() == null) { ctx.getSource().sendFailure(Component.literal("You are not inside an Outbreak dive.")); return 0; }
                     s.dive().operatorCheckpoint();
                     return 1;
-                })))
+                })).then(Commands.literal("find").then(Commands.argument("tier", StringArgumentType.word())
+                        .suggests((ctx, builder) -> net.minecraft.commands.SharedSuggestionProvider.suggest(
+                                java.util.Arrays.stream(com.ascensiondungeons.outbreak.PokemonFinds.Tier.values()).map(t -> t.name().toLowerCase(java.util.Locale.ROOT)), builder))
+                        .executes(ctx -> {
+                            // Operator aid for playtests: this player's next opened dive chest holds a Pokémon of this tier.
+                            ServerPlayer p = ctx.getSource().getPlayerOrException();
+                            AuthoredDirector director = AuthoredDirector.current;
+                            AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                            if (s == null || s.dive() == null) { ctx.getSource().sendFailure(Component.literal("You are not inside an Outbreak dive.")); return 0; }
+                            com.ascensiondungeons.outbreak.PokemonFinds.Tier tier;
+                            try { tier = com.ascensiondungeons.outbreak.PokemonFinds.Tier.valueOf(StringArgumentType.getString(ctx, "tier").toUpperCase(java.util.Locale.ROOT)); }
+                            catch (IllegalArgumentException e) { ctx.getSource().sendFailure(Component.literal("Tiers: standard, starter, pseudo, legendary, mythical.")); return 0; }
+                            s.dive().forceFind(p.getUUID(), tier);
+                            reply(ctx, "Your next dive chest holds a " + tier.label() + " Pokémon, if this dungeon has one of that tier (else none). Open a dive chest you have not opened yet.");
+                            return 1;
+                        }))))
                 .then(Commands.literal("chest").requires(s -> s.hasPermission(2)).executes(ctx -> {
                     ServerPlayer p = ctx.getSource().getPlayerOrException();
                     var id = net.minecraft.resources.ResourceLocation.parse("lootr:lootr_chest");

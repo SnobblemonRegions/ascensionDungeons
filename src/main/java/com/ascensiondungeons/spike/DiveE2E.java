@@ -1021,7 +1021,7 @@ public final class DiveE2E {
                 if (!used) {
                     chat.clear();
                     for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
-                    dive().forceFind(ID, com.ascensiondungeons.outbreak.PokemonFinds.Tier.PSEUDO);
+                    command("dungeon dive find pseudo");                 // the operator command a playtest uses
                     use(freshChest());
                     used = true;
                     return false;
