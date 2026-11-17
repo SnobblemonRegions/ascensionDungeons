@@ -124,6 +124,15 @@ _Avoid_: mercy, second chance, forgiven knock-out (half is still lost).
 
 ## Enemies
 
+**Difficulty**: How hard a dive fights: Casual, Normal, Hard or Nightmare. It changes enemy tactics, not damage or rewards.
+_Avoid_: threat (AscensionLib's band), tier.
+
+**Tactics**: How enemies fight once aggro says they will: spacing, taking turns, flanking, choosing a target, falling back, boss phases.
+
+**Pressing**: An enemy of a wave that is closing in on its target; the others hold a ring and wait their turn.
+
+**Charge**: A boss's rush along a line it first shows on the ground.
+
 **Enemy**: A hostile creature the dive spawned. With Cobblemon it is a Pokémon from the dungeon's pools, fighting in real time, uncatchable and not battleable turn-based.
 _Avoid_: mob in player-facing text, wild Pokémon (a wild Pokémon can be caught).
 

@@ -15,6 +15,7 @@ import com.ascensiondungeons.outbreak.Onboarding;
 import com.ascensiondungeons.outbreak.OutbreakClock;
 import com.ascensiondungeons.outbreak.Recap;
 import com.ascensiondungeons.outbreak.Spell;
+import com.ascensiondungeons.outbreak.Tactics;
 import com.ascensiondungeons.outbreak.Toll;
 import com.ascensiondungeons.outbreak.WavePlanner;
 import com.ascensiondungeons.run.Run;
@@ -93,6 +94,8 @@ public final class OutbreakDive {
         void hostile(Mob mob);
         /** How much tougher creatures are for this party's size. */
         double healthFactor();
+        /** How hard this dive fights ({@link Tactics.Difficulty}); normal unless the server or the run says otherwise. */
+        default String difficulty() { return "normal"; }
         /** True when this creature's targeting is run by the real-time Pokémon combat, which asks {@link #chooseTarget}. */
         boolean combatManaged(Mob mob);
     }
@@ -124,11 +127,38 @@ public final class OutbreakDive {
         final Aggro.Style style;
         final Vec3 anchor;
         final boolean elite;
-        final Spell spell;
+        Spell spell;
         final Spell.Cast cast = new Spell.Cast();
         boolean alerted;
         Vec3 castCentre;
-        Enemy(Mob mob, Aggro.Style style, Vec3 anchor, boolean elite, Spell spell) { this.mob = mob; this.style = style; this.anchor = anchor; this.elite = elite; this.spell = spell; }
+        // ---- tactics ----
+        /** The wave it came in (0 for none), its place round the target, and whether it is one of those pressing in. */
+        int group, slot, slots = 1;
+        double baseAngle;
+        boolean pressing = true;
+        /** Which way it circles. */
+        final boolean clockwise;
+        /** Who has been hurting it. */
+        final Tactics.Threat threat = new Tactics.Threat();
+        UUID locked;
+        long lockUntil;
+        double lastHealth = 1;
+        boolean retreated;
+        long retreatUntil = -1;
+        Enemy(Mob mob, Aggro.Style style, Vec3 anchor, boolean elite, Spell spell) {
+            this.mob = mob; this.style = style; this.anchor = anchor; this.elite = elite; this.spell = spell;
+            this.clockwise = (mob.getUUID().getLeastSignificantBits() & 1) == 0;
+        }
+    }
+
+    /** A boss as it fights: its phases, and a charge being wound up. */
+    private static final class Boss {
+        final Tactics.BossPhases phases = new Tactics.BossPhases();
+        final int band;
+        long nextCharge = -1;
+        Vec3 chargeFrom, chargeTo;
+        long chargeAt = -1;
+        Boss(int band) { this.band = band; }
     }
 
     private final Host host;
@@ -178,6 +208,11 @@ public final class OutbreakDive {
     private final Map<UUID, Integer> conquered = new HashMap<>();
     private final List<PieceState> pieces = new ArrayList<>();
     private int hazardPulses;
+    // ---- tactics ----
+    private final Tactics.Difficulty difficulty;
+    private final Map<UUID, Boss> bosses = new HashMap<>();
+    private int nextGroup = 1;
+    private int retreats, summons, charges, chargeHits;
     /** A set piece's sealed chest, by where it stands. */
     private final Map<BlockPos, PieceState> sealedChests = new HashMap<>();
 
@@ -285,6 +320,7 @@ public final class OutbreakDive {
         this.tollPercent = Math.max(0, Math.min(100, Jx.i(p, "tollPercent", 35)));
         this.firstFree = Jx.b(p, "firstExtractionFree", true);
         this.firstSofter = Jx.b(Jx.o(cfg, "knockOut"), "firstKeepsHalf", true);
+        this.difficulty = Tactics.Difficulty.parse(host.difficulty(), Tactics.Difficulty.NORMAL);
         this.baseTier = Math.max(1, Jx.i(host.layout().data().pokemon, "tier", 1));
         for (JsonElement e : Jx.a(cfg, "checkpoints")) checkpoints.add(e.getAsString());
         for (JsonElement e : Jx.a(cfg, "spells")) {
@@ -436,6 +472,7 @@ public final class OutbreakDive {
         }
         if (now % 5 == 0) enemiesTick(players);
         spellsTick(players);
+        bossesTick(players);
         if (now % 10 == 0) barsTick(players);
         if (now % 20 == 0) featuresTick(players);
     }
@@ -909,6 +946,16 @@ public final class OutbreakDive {
             placed++;
         }
         if (placed > 0) AscensionDungeonsLog.LOG.info("[dive] run {} wave: {} enemies at stage {} in {} (band {})", runId(), placed, stage, room.id, band);
+        // The wave works together: each has its own side to come from, and only a few press in at once.
+        if (out.size() > 1) {
+            int group = nextGroup++, press = Tactics.profile(difficulty, band, stage).maxPressing();
+            double base = rng.nextDouble() * Math.PI * 2;
+            for (int i = 0; i < out.size(); i++) {
+                Enemy en = enemies.get(out.get(i).getUUID());
+                if (en == null) continue;
+                en.group = group; en.slot = i; en.slots = out.size(); en.baseAngle = base; en.pressing = i < press;
+            }
+        }
         return out;
     }
 
@@ -978,7 +1025,16 @@ public final class OutbreakDive {
             Aggro.Decision d = decide(en, targets);
             if (d.target() >= 0) {
                 en.mob.setNoAi(false);
-                en.mob.setTarget(targets.get(d.target()));
+                ServerPlayer target = targets.get(pickTarget(en, targets, d.target()));
+                // A vanilla creature fights with its own AI; tactics steer it where it should be instead of in the target's face.
+                Vec3 to = moveIntent(en.mob, target, 0);
+                if (to == null) en.mob.setTarget(target);
+                else {
+                    boolean striking = en.pressing && now >= en.retreatUntil && !bosses.containsKey(en.mob.getUUID()) && en.style != Aggro.Style.SKIRMISHER;
+                    en.mob.setTarget(striking || en.mob.getType() == net.minecraft.world.entity.EntityType.SKELETON ? target : null);
+                    en.mob.getNavigation().moveTo(to.x, to.y, to.z, 1.1);
+                    en.mob.getLookControl().setLookAt(target);
+                }
             } else if (d.returnHome()) {
                 en.mob.setNoAi(false);
                 en.mob.setTarget(null);
@@ -999,9 +1055,111 @@ public final class OutbreakDive {
         Enemy en = enemies.get(hostile.getUUID());
         if (en == null || closed) return nearest;
         Aggro.Decision d = decide(en, candidates);
-        if (d.target() >= 0) return candidates.get(d.target());
+        if (d.target() >= 0) return candidates.get(pickTarget(en, candidates, d.target()));
         if (d.returnHome()) hostile.getNavigation().moveTo(en.anchor.x, en.anchor.y, en.anchor.z, 1.0);
         return null;
+    }
+
+    /** The profile for an enemy where it stands now. */
+    private Tactics.Profile profile(Mob mob) {
+        AuthoredLayout.Room room = roomOf(mob.position());
+        return Tactics.profile(difficulty, room == null ? 0 : host.layout().band(host.run().seed(), room), stage());
+    }
+
+    /**
+     * Once aggro has said an enemy will fight, which of the targets in sight it goes for: by distance, who hurts it and who is
+     * hurt, kept for a while once chosen. An enemy tied to a post (sentry, guardian) keeps what its post allows.
+     */
+    private int pickTarget(Enemy en, List<? extends LivingEntity> candidates, int aggroPick) {
+        if (en.style == Aggro.Style.SENTRY || en.style == Aggro.Style.GUARDIAN) return aggroPick;
+        Tactics.Profile p = profile(en.mob);
+        List<Tactics.Candidate> cs = new ArrayList<>(candidates.size());
+        int locked = -1;
+        double sight = Aggro.Ranges.DEFAULT.sight();
+        for (int i = 0; i < candidates.size(); i++) {
+            LivingEntity c = candidates.get(i);
+            double dist = en.mob.distanceToSqr(c);
+            cs.add(new Tactics.Candidate(dist > sight * sight ? 1e9 : dist, c.getHealth() / Math.max(1f, c.getMaxHealth()), en.threat.of(c.getUUID(), now)));
+            if (c.getUUID().equals(en.locked)) locked = i;
+        }
+        int pick = Tactics.pick(cs, locked, now < en.lockUntil, p);
+        if (pick < 0 || cs.get(pick).distSq() >= 1e9) pick = aggroPick;
+        if (!candidates.get(pick).getUUID().equals(en.locked)) { en.locked = candidates.get(pick).getUUID(); en.lockUntil = now + p.lockTicks(); }
+        return pick;
+    }
+
+    /** Something in this dive was hurt: an enemy remembers who did it, so it can turn on them. */
+    void hurt(LivingEntity victim, net.minecraft.world.damagesource.DamageSource source, float amount) {
+        if (closed) return;
+        Enemy en = enemies.get(victim.getUUID());
+        Entity by = source == null ? null : source.getEntity();
+        if (en == null || by == null || by == victim) return;
+        en.threat.hurt(by.getUUID(), amount, now);
+        en.alerted = true;
+    }
+
+    /**
+     * Where a fighting enemy should be, when that is not simply in its target's face: winding up a charge (stand still), falling
+     * back, keeping a ranged fighter's distance, waiting its turn on a ring round the target, or coming in from its own side.
+     * Null means close in as usual.
+     */
+    Vec3 moveIntent(Mob mob, LivingEntity target, double preferredRange) {
+        Enemy en = enemies.get(mob.getUUID());
+        if (en == null || closed || target == null) return null;
+        Boss boss = bosses.get(mob.getUUID());
+        if (boss != null && boss.chargeAt >= 0) return mob.position();
+        Tactics.Profile p = profile(mob);
+        // Falling back: once, when badly hurt, toward its packmates (or simply away).
+        double health = mob.getHealth() / Math.max(1f, mob.getMaxHealth());
+        if (Tactics.retreat(en.lastHealth, health, en.retreated, en.elite || boss != null, host.random().nextDouble(), p)) {
+            en.retreated = true;
+            en.retreatUntil = now + Tactics.RETREAT_TICKS;
+            retreats++;
+            host.level().sendParticles(ParticleTypes.CLOUD, mob.getX(), mob.getY() + 0.5, mob.getZ(), 8, 0.3, 0.2, 0.3, 0.02);
+        }
+        en.lastHealth = health;
+        if (now < en.retreatUntil) return retreatPoint(en, target);
+        double dx = mob.getX() - target.getX(), dz = mob.getZ() - target.getZ(), dist = Math.hypot(dx, dz);
+        // A ranged fighter keeps its distance: its own moves, or a skirmisher's way of fighting.
+        double range = Math.max(preferredRange, en.style == Aggro.Style.SKIRMISHER ? p.kiteRange() : 0);
+        if (range > 0) {
+            double[] at = Tactics.spacingPoint(mob.getX(), mob.getZ(), target.getX(), target.getZ(), range, en.clockwise);
+            return new Vec3(at[0], target.getY(), at[1]);
+        }
+        if (en.group == 0) return null;
+        // A wave: count who is pressing this target; wait on the ring until there is room.
+        int pressing = 0;
+        for (Enemy o : enemies.values())
+            if (o != en && o.group == en.group && o.pressing && o.mob.isAlive() && o.mob.getTarget() == target && now >= o.retreatUntil) pressing++;
+        if (!en.pressing && Tactics.mayPress(false, pressing, p)) en.pressing = true;
+        else if (en.pressing && pressing >= p.maxPressing() + 1) en.pressing = false;      // too many: step back out
+        double angle = Tactics.slotAngle(en.slot, en.slots, en.baseAngle);
+        if (!en.pressing) {
+            angle += (en.clockwise ? 1 : -1) * 0.01 * (now % 600);                            // circling slowly while it waits
+            double[] at = Tactics.ringPoint(target.getX(), target.getZ(), angle, Tactics.HOLD_RADIUS);
+            return new Vec3(at[0], target.getY(), at[1]);
+        }
+        // Pressing: from its own side when the profile flanks, until it is close enough to strike.
+        if (p.flank() && dist > 4.5) {
+            double[] at = Tactics.ringPoint(target.getX(), target.getZ(), angle, 2.5);
+            return new Vec3(at[0], target.getY(), at[1]);
+        }
+        return null;
+    }
+
+    /** Toward the nearest packmate that is not falling back too, or else straight away from the target. */
+    private Vec3 retreatPoint(Enemy en, LivingEntity target) {
+        Enemy friend = null;
+        double best = 16 * 16;
+        for (Enemy o : enemies.values()) {
+            if (o == en || !o.mob.isAlive() || now < o.retreatUntil) continue;
+            double d = o.mob.distanceToSqr(en.mob);
+            if (d < best && o.mob.distanceToSqr(target) > en.mob.distanceToSqr(target) - 4) { best = d; friend = o; }
+        }
+        if (friend != null) return friend.mob.position();
+        Vec3 away = en.mob.position().subtract(target.position());
+        away = away.lengthSqr() < 1e-4 ? new Vec3(1, 0, 0) : new Vec3(away.x, 0, away.z).normalize();
+        return en.mob.position().add(away.scale(6));
     }
 
     /** How many times tougher than normal this creature is: 1 for anything the dive has not toughened. */
@@ -1197,6 +1355,7 @@ public final class OutbreakDive {
         com.google.gson.JsonArray pool = Jx.a(g, "spells");
         Spell spell = pool.size() == 0 ? null : spells.get(pool.get(host.random().nextInt(pool.size())).getAsString());
         register(mob, Aggro.Style.HUNTER, true, spell);
+        bosses.put(mob.getUUID(), new Boss(0));
         gatekeeper = mob;
         AscensionDungeonsLog.LOG.info("[dive] run {} gatekeeper {} called at stage {}: health {} strength x{}", runId(), mob.getName().getString(), stage, mob.getMaxHealth(), strength);
         return true;
@@ -1314,6 +1473,132 @@ public final class OutbreakDive {
         }
     }
 
+    // ---- bosses: phases and the charge ------------------------------------------------------------------------
+
+    private void bossesTick(List<ServerPlayer> players) {
+        if (bosses.isEmpty()) return;
+        List<ServerPlayer> live = unsettled(players);
+        for (var it = bosses.entrySet().iterator(); it.hasNext(); ) {
+            var e = it.next();
+            Enemy en = enemies.get(e.getKey());
+            if (en == null || !en.mob.isAlive()) { it.remove(); continue; }
+            Boss boss = e.getValue();
+            Mob mob = en.mob;
+            Tactics.Profile p = Tactics.profile(difficulty, boss.band, stage());
+            int entered = boss.phases.update(mob.getHealth() / Math.max(1f, mob.getMaxHealth()));
+            if (entered == 1 || entered == 3) callHelp(en, boss, p, live);
+            if (entered == 2 || entered == 3) enrage(en, p, live);
+            if (boss.chargeAt >= 0) { chargeTick(en, boss, p, live); continue; }
+            if (!p.charges() || boss.phases.phase() < 1) continue;
+            if (boss.nextCharge < 0) boss.nextCharge = now + p.chargeEvery() / 2;
+            if (now < boss.nextCharge || now % 5 != 0) continue;
+            LivingEntity target = mob.getTarget();
+            if (!(target instanceof ServerPlayer tp) || !live.contains(tp)) continue;
+            double d = mob.distanceTo(target);
+            if (d < 3 || d > 16) continue;
+            // Wind up: the line it will run shows on the ground first.
+            Vec3 dir = new Vec3(target.getX() - mob.getX(), 0, target.getZ() - mob.getZ()).normalize();
+            boss.chargeFrom = mob.position();
+            boss.chargeTo = mob.position().add(dir.scale(Tactics.CHARGE_LENGTH));
+            boss.chargeAt = now + p.chargeWarning();
+            mob.getNavigation().stop();
+            for (ServerPlayer pl : live)
+                if (pl.distanceToSqr(mob) < 24 * 24) pl.displayClientMessage(Component.literal(mob.getName().getString() + " is about to charge! Step off the line.").withStyle(ChatFormatting.RED), true);
+            sound(mob.blockPosition(), SoundEvents.RAVAGER_ROAR, 0.7f, 1.3f);
+        }
+    }
+
+    private void chargeTick(Enemy en, Boss boss, Tactics.Profile p, List<ServerPlayer> players) {
+        Mob mob = en.mob;
+        if (now < boss.chargeAt) {
+            mob.getNavigation().stop();
+            if (now % 2 == 0) {
+                DustParticleOptions red = new DustParticleOptions(new Vector3f(1f, 0.15f, 0.1f), 1.3f);
+                Vec3 step = boss.chargeTo.subtract(boss.chargeFrom).scale(1 / Tactics.CHARGE_LENGTH);
+                for (int i = 0; i <= (int) Tactics.CHARGE_LENGTH; i++) {
+                    Vec3 at = boss.chargeFrom.add(step.scale(i));
+                    host.level().sendParticles(red, at.x, at.y + 0.15, at.z, 1, 0.25, 0, 0.25, 0);
+                }
+            }
+            return;
+        }
+        // The rush: along the line, hitting whoever is still on it.
+        Vec3 dir = boss.chargeTo.subtract(boss.chargeFrom).normalize();
+        mob.setDeltaMovement(dir.x * 1.6, 0.25, dir.z * 1.6);
+        mob.hurtMarked = true;
+        double damage = 4 + 2 * boss.band + stage();
+        for (ServerPlayer pl : players) {
+            if (pl.isCreative() || Math.abs(pl.getY() - boss.chargeFrom.y) > 2.5) continue;
+            if (!Tactics.onLine(pl.getX(), pl.getZ(), boss.chargeFrom.x, boss.chargeFrom.z, boss.chargeTo.x, boss.chargeTo.z, 1.3)) continue;
+            lastSpell.put(pl.getUUID(), "a charge (" + mob.getName().getString() + ")");
+            lastSpellAt.put(pl.getUUID(), now);
+            pl.hurt(host.level().damageSources().mobAttack(mob), (float) damage);
+            pl.setDeltaMovement(dir.x * 1.2, 0.5, dir.z * 1.2);
+            pl.hurtMarked = true;
+            chargeHits++;
+        }
+        sound(mob.blockPosition(), SoundEvents.RAVAGER_STEP, 1f, 0.7f);
+        host.level().sendParticles(ParticleTypes.CLOUD, mob.getX(), mob.getY() + 0.3, mob.getZ(), 30, 0.6, 0.2, 0.6, 0.05);
+        boss.chargeAt = -1;
+        boss.nextCharge = now + (long) (p.chargeEvery() / (boss.phases.phase() >= 2 ? p.enrage() : 1));
+        charges++;
+    }
+
+    /** Below two thirds of its health a boss calls help: a few more of the dungeon's enemies, round it. */
+    private void callHelp(Enemy en, Boss boss, Tactics.Profile p, List<ServerPlayer> players) {
+        if (p.summons() <= 0) return;
+        List<ServerPlayer> near = new ArrayList<>();
+        for (ServerPlayer pl : players) if (pl.distanceToSqr(en.mob) < 32 * 32) near.add(pl);
+        if (near.isEmpty()) near = players;
+        if (near.isEmpty()) return;
+        List<Mob> help = spawnWave(p.summons(), near, Jx.a(Jx.o(cfg, "waves"), "spawns"), en.mob.position(), false);
+        summons += help.size();
+        for (ServerPlayer pl : near) pl.displayClientMessage(Component.literal(en.mob.getName().getString() + " calls for help!").withStyle(ChatFormatting.GOLD), true);
+        sound(en.mob.blockPosition(), SoundEvents.EVOKER_PREPARE_SUMMON, 0.8f, 0.9f);
+        AscensionDungeonsLog.LOG.info("[dive] run {} {} called {} for help", runId(), en.mob.getName().getString(), help.size());
+    }
+
+    /** Below a third of its health a boss is enraged: its spell comes faster. */
+    private void enrage(Enemy en, Tactics.Profile p, List<ServerPlayer> players) {
+        if (en.spell != null && p.enrage() > 1) {
+            Spell s = en.spell;
+            int cooldown = Math.max(s.warnTicks(), (int) (s.cooldownTicks() / p.enrage()));
+            en.spell = new Spell(s.id(), s.name(), cooldown, s.warnTicks(), s.range(), s.radius(), s.damage(), s.effect(), s.strength());
+        }
+        for (ServerPlayer pl : players)
+            if (pl.distanceToSqr(en.mob) < 32 * 32) pl.displayClientMessage(Component.literal(en.mob.getName().getString() + " is enraged!").withStyle(ChatFormatting.DARK_RED), true);
+        host.level().sendParticles(ParticleTypes.ANGRY_VILLAGER, en.mob.getX(), en.mob.getY() + en.mob.getBbHeight(), en.mob.getZ(), 12, 0.5, 0.3, 0.5, 0.02);
+        sound(en.mob.blockPosition(), SoundEvents.RAVAGER_ROAR, 0.9f, 0.7f);
+    }
+
+    /** Test aid: what tactics have done so far in this dive. */
+    public String tacticsReport() {
+        return "difficulty=" + difficulty.label() + " retreats=" + retreats + " summons=" + summons + " charges=" + charges + " chargeHits=" + chargeHits;
+    }
+
+    /** Test aid: a boss's phase (0 untouched, 1 called help, 2 enraged), or -1 when it is not a boss. */
+    public int bossPhase(Mob mob) { Boss b = bosses.get(mob.getUUID()); return b == null ? -1 : b.phases.phase(); }
+
+    /** Test aid: whether a boss is winding up a charge now. */
+    public boolean charging(Mob mob) { Boss b = bosses.get(mob.getUUID()); return b != null && b.chargeAt >= 0; }
+
+    /** Test aid: a wave of the dungeon's ordinary enemies round a point, all of one aggro style, as a group. */
+    public List<Mob> testWave(int count, String style, Vec3 around) {
+        com.google.gson.JsonArray defs = new com.google.gson.JsonArray();
+        for (JsonElement e : Jx.a(Jx.o(cfg, "waves"), "spawns")) {
+            JsonObject def = e.getAsJsonObject().deepCopy();
+            def.addProperty("style", style);
+            def.addProperty("minStage", 0);
+            defs.add(def);
+        }
+        return spawnWave(count, unsettled(host.players()), defs, around, false);
+    }
+
+    /** Test aid: whether this enemy is one of its wave's few pressing in, and its wave. */
+    public boolean pressing(Mob mob) { Enemy en = enemies.get(mob.getUUID()); return en != null && en.pressing; }
+
+    public Tactics.Difficulty difficulty() { return difficulty; }
+
     // ---- the Depths' set pieces ------------------------------------------------------------------------------
 
     private boolean isAlpha(Mob mob) { for (PieceState ps : pieces) if (ps.alpha == mob) return true; return false; }
@@ -1374,6 +1659,18 @@ public final class OutbreakDive {
     }
 
     private void alphaTick(PieceState ps, List<ServerPlayer> players) {
+        // An Alpha that left the world without falling (its chunk unloaded, or something removed it) must not leave its hoard
+        // sealed for good: find it again if it came back, otherwise a new one takes the post when a player comes near.
+        if (ps.alpha != null && ps.alpha.isRemoved() && ps.alpha.getRemovalReason() != Entity.RemovalReason.KILLED) {
+            Entity back = host.level().getEntity(ps.alpha.getUUID());
+            if (back instanceof Mob m && m.isAlive()) ps.alpha = m;
+            else {
+                enemies.remove(ps.alpha.getUUID());
+                bosses.remove(ps.alpha.getUUID());
+                if (ps.bar != null) { ps.bar.removeAllPlayers(); ps.bar = null; }
+                ps.alpha = null;
+            }
+        }
         if (ps.alpha == null) {
             List<ServerPlayer> near = around(ps, players, 18);
             if (near.isEmpty()) return;
@@ -1412,6 +1709,7 @@ public final class OutbreakDive {
         com.google.gson.JsonArray pool = Jx.a(Jx.o(cfg, "elite"), "spells");
         Spell spell = pool.size() == 0 ? null : spells.get(pool.get(host.random().nextInt(pool.size())).getAsString());
         register(mob, Aggro.Style.GUARDIAN, true, spell);
+        bosses.put(mob.getUUID(), new Boss(ps.piece.band()));
         AscensionDungeonsLog.LOG.info("[dive] run {} alpha {} in {} (band {}): health x{}", runId(), mob.getName().getString(), ps.piece.room(), ps.piece.band(), String.format("%.1f", health));
         return mob;
     }

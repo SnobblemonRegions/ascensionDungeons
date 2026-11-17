@@ -778,6 +778,8 @@ public final class DiveE2E {
         throw new IllegalStateException("this dive has no " + kind);
     }
 
+    private static String alphaRoom;
+
     private static void teleport(int x, int y, int z) { bot.teleportTo((ServerLevel) bot.level(), x + 0.5, y, z + 0.5, 0f, 0f); }
 
     /** The Depths' bands and set pieces, in one dive: a band's name on screen, a nest cleared, an Alpha slain, a hazard room. */
@@ -803,9 +805,127 @@ public final class DiveE2E {
                 return dive().bandOf(ID) == 2 && titles.contains("The Abyssal Cistern");
             }
         }));
-        steps.add(new Step(label + ": the Alpha's hoard is sealed, the Alpha takes its post as the player comes near, and slaying it opens the hoard", 600, new BooleanSupplier() {
+        steps.add(new Step(label + ": a skirmisher put next to the player backs off and keeps its distance", 400, new BooleanSupplier() {
+            Mob m;
+            int samples, inRange;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                bot.setHealth(bot.getMaxHealth());
+                if (m == null) {
+                    for (Mob o : dive().enemyMobs()) if (dive().bossPhase(o) < 0) o.discard();
+                    BlockPos at = depthsEntrance();
+                    teleport(at.getX(), at.getY(), at.getZ());
+                    List<Mob> wave = dive().testWave(1, "skirmisher", bot.position());
+                    if (wave.isEmpty()) return false;
+                    m = wave.get(0);
+                    m.teleportTo(bot.getX() + 2, bot.getY(), bot.getZ());
+                    samples = -60;                                   // three seconds to get its bearings
+                    return false;
+                }
+                if (!m.isAlive()) throw new IllegalStateException("the skirmisher died");
+                if (bot.server.getTickCount() % 10 != 0) return false;
+                samples += 10;
+                if (samples <= 0) return false;
+                double d = m.distanceTo(bot);
+                if (d >= 4.5 && d <= 11.5) inRange++;
+                if (samples < 120) return false;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E skirmisher {} ({}): within range in {} of 12 samples, last {}", m.getName().getString(), m.getClass().getSimpleName(), inRange, String.format("%.1f", d));
+                m.discard();
+                return inRange >= 9;
+            }
+        }));
+        steps.add(new Step(label + ": a wave of six round the player takes turns: only a few press in while the rest hold a ring", 600, new BooleanSupplier() {
+            List<Mob> wave;
+            int samples, ringSeen, worst;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                bot.setHealth(bot.getMaxHealth());
+                if (wave == null) {
+                    for (Mob o : dive().enemyMobs()) if (dive().bossPhase(o) < 0) o.discard();
+                    wave = dive().testWave(6, "hunter", bot.position());
+                    if (wave.size() < 4) { for (Mob o : wave) o.discard(); wave = null; return false; }
+                    samples = -120;
+                    return false;
+                }
+                if (bot.server.getTickCount() % 10 != 0) return false;
+                samples += 10;
+                if (samples <= 0) return false;
+                int close = 0, ring = 0, pressing = 0;
+                for (Mob o : wave) {
+                    if (!o.isAlive()) continue;
+                    double d = o.distanceTo(bot);
+                    if (d < 2.8) close++;
+                    if (d >= 4.5 && d <= 8.5) ring++;
+                    if (dive().pressing(o)) pressing++;
+                }
+                worst = Math.max(worst, close);
+                if (ring > 0) ringSeen++;
+                if (samples < 100) return false;
+                int allowed = com.ascensiondungeons.outbreak.Tactics.profile(dive().difficulty(), 0, 0).maxPressing();
+                AscensionDungeonsLog.LOG.info("DIVE-E2E wave of {}: at most {} within reach at once (allowed {} pressing +1), some on the ring in {} of 10 samples, {} marked pressing",
+                        wave.size(), worst, allowed, ringSeen, pressing);
+                for (Mob o : wave) o.discard();
+                return worst <= allowed + 1 && ringSeen >= 5 && pressing <= allowed + 1;
+            }
+        }));
+        steps.add(new Step(label + ": an Alpha worn below two thirds calls help, below a third is enraged, and winds up a charge with a line on the ground", 800, new BooleanSupplier() {
+            int phase;
+            Mob alpha;
+            String report;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                bot.setHealth(bot.getMaxHealth());
+                String[] a = piece("ALPHA");
+                if (phase == 0) {
+                    // the second Alpha, so the first is left for the hoard step
+                    String[] second = null;
+                    for (String line : dive().pieceLines()) if (line.startsWith("ALPHA ") && !line.split(" ")[1].equals(a[1])) second = line.split(" ");
+                    if (second == null) throw new IllegalStateException("only one alpha");
+                    teleport(Integer.parseInt(second[3]) + 4, Integer.parseInt(second[4]), Integer.parseInt(second[5]));
+                    a = second;
+                    alphaRoom = second[1];
+                    phase = 1;
+                    return false;
+                }
+                if (phase == 1) {
+                    List<Mob> mobs = dive().pieceMobs(alphaRoom);
+                    for (Mob m : mobs) if (dive().bossPhase(m) >= 0) alpha = m;
+                    if (alpha == null) return false;
+                    chat.clear();
+                    alpha.setHealth(alpha.getMaxHealth() * 0.6f);
+                    phase = 2;
+                    return false;
+                }
+                if (phase == 2) {
+                    if (dive().bossPhase(alpha) < 1) return false;
+                    report = dive().tacticsReport();
+                    alpha.setHealth(alpha.getMaxHealth() * 0.3f);
+                    phase = 3;
+                    return false;
+                }
+                if (phase == 3) {
+                    if (dive().bossPhase(alpha) < 2) return false;
+                    phase = 4;
+                    return false;
+                }
+                // keep the player in front of it, inside its ground, until it winds up; then stand still on the line
+                if (phase == 4 && (bot.distanceTo(alpha) < 3.5 || bot.distanceTo(alpha) > 7)) teleport((int) Math.floor(alpha.getX()) + 5, (int) Math.floor(alpha.getY()), (int) Math.floor(alpha.getZ()));
+                if (phase == 4) {
+                    if (!dive().charging(alpha)) return false;
+                    phase = 5;                                        // wound up: now stand on the line and let it come
+                    return false;
+                }
+                if (dive().charging(alpha) || !dive().tacticsReport().contains("charges=1")) return false;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E alpha phases: after help {}; after the charge {}; health {} of {}", report, dive().tacticsReport(), alpha.getHealth(), alpha.getMaxHealth());
+                boolean helped = !report.contains("summons=0"), hit = !dive().tacticsReport().contains("chargeHits=0");
+                alpha.kill();
+                return helped && hit;
+            }
+        }));
+        steps.add(new Step(label + ": the Alpha's hoard is sealed, the Alpha takes its post as the player comes near (a new one if it is removed), and slaying it opens the hoard", 600, new BooleanSupplier() {
             int phase;
             int[] hoard;
+            UUID gone;
             @Override public boolean getAsBoolean() {
                 bot.setInvulnerable(true);
                 bot.setHealth(bot.getMaxHealth());
@@ -830,6 +950,10 @@ public final class DiveE2E {
                     if (bot.containerMenu != bot.inventoryMenu) throw new IllegalStateException("a sealed hoard opened");
                     List<Mob> alpha = dive().pieceMobs(a[1]);
                     if (alpha.isEmpty()) return false;
+                    // First, an Alpha that leaves the world without falling: a new one must take the post, or the hoard stays sealed for good.
+                    if (gone == null) { gone = alpha.get(0).getUUID(); alpha.get(0).discard(); return false; }
+                    if (alpha.get(0).getUUID().equals(gone)) return false;
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E a removed alpha was replaced by {}", alpha.get(0).getName().getString());
                     Mob m = alpha.get(0);
                     AscensionDungeonsLog.LOG.info("DIVE-E2E alpha: {} health {} of {} ({})", m.getName().getString(), m.getHealth(), m.getMaxHealth(), m.getClass().getSimpleName());
                     if (!m.getName().getString().startsWith("Alpha ") || !m.hasGlowingTag()) throw new IllegalStateException("not an alpha: " + m.getName().getString());
@@ -909,7 +1033,7 @@ public final class DiveE2E {
             @Override public boolean getAsBoolean() {
                 if (!left) { chat.clear(); manager.get().leave(ID); left = true; return false; }
                 if (manager.get().runOf(ID).isPresent()) return false;
-                return heard("Deepest: The Abyssal Cistern") && heard("Nests and Alphas beaten: 2");
+                return heard("Deepest: The Abyssal Cistern") && heard("Nests and Alphas beaten: 3");
             }
         }));
     }

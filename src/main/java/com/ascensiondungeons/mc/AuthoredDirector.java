@@ -75,6 +75,11 @@ public final class AuthoredDirector implements ArenaDirector {
             Session s = sessionFor(hostile.level());
             return s == null || s.dive() == null ? nearest : s.dive().chooseTarget(hostile, candidates, nearest);
         });
+        // ... and where it stands while it fights: tactics (spacing, turns, flanking, falling back, a boss's charge).
+        if (combat != null) combat.movement((hostile, target, range) -> {
+            Session s = sessionFor(hostile.level());
+            return s == null || s.dive() == null ? null : s.dive().moveIntent(hostile, target, range);
+        });
     }
 
     /** Operator/test aid: sends the player's first Pokemon out. */
@@ -184,6 +189,8 @@ public final class AuthoredDirector implements ArenaDirector {
 
     /** One run's mutable mechanics state. */
     public final class Session implements OutbreakDive.Host {
+        @Override public String difficulty() { return cfg.diveDifficulty; }
+
         static final int COMPLETE_DELAY_DEFAULT = 45;
         /** The Outbreak dive for this run, or null when the dungeon is an ordinary one. */
         private OutbreakDive dive;

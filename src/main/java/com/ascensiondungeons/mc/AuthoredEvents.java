@@ -48,6 +48,7 @@ public final class AuthoredEvents {
             try {
                 AuthoredDirector.Session s = d.sessionFor(entity.level());
                 if (s == null || s.dive() == null) return true;
+                s.dive().hurt(entity, source, amount);           // who is hurting whom: enemies remember it
                 double tough = s.dive().toughness(entity);
                 if (tough <= 1.0) return true;
                 reducing = true;

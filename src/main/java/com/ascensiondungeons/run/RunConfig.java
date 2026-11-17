@@ -59,6 +59,11 @@ public final class RunConfig {
     public boolean authoredCombat = false;
     /** Whether any player may open the dungeon picker with /dive. Off, the command needs operator rights (for servers that open it from an NPC). */
     public boolean playerDives = true;
+    /**
+     * How hard dives fight: casual, normal, hard or nightmare. It sets enemy tactics (how many close in at once, flanking,
+     * focusing the hurt, falling back, boss charges). A per-run choice can replace this later.
+     */
+    public String diveDifficulty = "normal";
     /** How long a party invitation stands. */
     public int partyInviteSeconds = 60;
     public boolean authoredRealtimeBoss = false;

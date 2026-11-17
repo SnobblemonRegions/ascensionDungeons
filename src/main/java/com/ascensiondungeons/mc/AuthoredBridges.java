@@ -33,6 +33,9 @@ public final class AuthoredBridges {
         /** Lets the dungeon decide which target a hostile takes; without one a hostile takes the nearest. */
         void targeting(Targeting targeting);
 
+        /** Lets the dungeon decide where a hostile moves while it has no move to use; without one it closes in. */
+        default void movement(Movement movement) {}
+
         /** Makes a creature hit harder (bosses). */
         void empower(Mob creature, double damageMultiplier);
 
@@ -50,6 +53,16 @@ public final class AuthoredBridges {
     @FunctionalInterface
     public interface Targeting {
         net.minecraft.world.entity.LivingEntity choose(Mob hostile, List<net.minecraft.world.entity.LivingEntity> candidates, net.minecraft.world.entity.LivingEntity nearest);
+    }
+
+    /**
+     * Where a hostile should be while it fights. {@code preferredRange} is the distance its own moves work best from (0 for a
+     * fighter that must touch its target). Returns a position to head for, the hostile's own position to stand still, or null to
+     * close in on the target as usual.
+     */
+    @FunctionalInterface
+    public interface Movement {
+        net.minecraft.world.phys.Vec3 position(Mob hostile, net.minecraft.world.entity.LivingEntity target, double preferredRange);
     }
 
     public enum RaidOutcome { VICTORY, DEFEAT, ABORTED }
