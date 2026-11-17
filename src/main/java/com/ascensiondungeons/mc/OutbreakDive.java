@@ -13,6 +13,7 @@ import com.ascensiondungeons.outbreak.FeaturePlanner;
 import com.ascensiondungeons.outbreak.Haul;
 import com.ascensiondungeons.outbreak.Onboarding;
 import com.ascensiondungeons.outbreak.OutbreakClock;
+import com.ascensiondungeons.outbreak.PokemonFinds;
 import com.ascensiondungeons.outbreak.Recap;
 import com.ascensiondungeons.outbreak.Spell;
 import com.ascensiondungeons.outbreak.Tactics;
@@ -213,6 +214,11 @@ public final class OutbreakDive {
     private final Map<UUID, Boss> bosses = new HashMap<>();
     private int nextGroup = 1;
     private int retreats, summons, charges, chargeHits;
+    // ---- Pokémon found ----
+    /** What each player found, as "Dratini (Pseudo-legendary)", and capsule ids to tell kept from lost at the end. */
+    private final Map<UUID, List<String[]>> found = new HashMap<>();
+    /** Players whose next chest will hold a Pokémon of this tier (test aid). */
+    private final Map<UUID, PokemonFinds.Tier> forcedFinds = new HashMap<>();
     /** A set piece's sealed chest, by where it stands. */
     private final Map<BlockPos, PieceState> sealedChests = new HashMap<>();
 
@@ -536,6 +542,8 @@ public final class OutbreakDive {
 
     /** A player's opening words: the tutorial for someone new to dives, the short briefing for everyone else. */
     private void greet(ServerPlayer p) {
+        p.sendSystemMessage(Component.literal("Difficulty: " + difficulty.label()).withStyle(difficulty == Tactics.Difficulty.NIGHTMARE ? ChatFormatting.DARK_PURPLE
+                : difficulty == Tactics.Difficulty.HARD ? ChatFormatting.RED : difficulty == Tactics.Difficulty.CASUAL ? ChatFormatting.GREEN : ChatFormatting.YELLOW));
         if (coach.coached(p)) {
             coach.notice(p, Onboarding.Lesson.WELCOME, now);
             coach.notice(p, Onboarding.Lesson.OUTBREAK, now);
@@ -851,7 +859,7 @@ public final class OutbreakDive {
                     tollItems.getOrDefault(player, 0) + (kept ? 0 : carried), s.arenaWins(), tollWins.getOrDefault(player, 0) + (kept ? 0 : unbankedWins),
                     everBanked.contains(player), knockedOutBy.get(player), knockedOutBySpell.contains(player), tollPercent, softened.contains(player),
                     deepestBand.containsKey(player) ? DepthBands.name(host.layout().id(), deepestBand.get(player)) : null, deepestBand.getOrDefault(player, -1),
-                    conquered.getOrDefault(player, 0)));
+                    conquered.getOrDefault(player, 0), foundFor(online)));
         }
         AscensionDungeonsLog.LOG.info("[dive] run {} settled {} exit={} arenaWins={} boss={} chests={} tier={} loot {} {} stack(s){}", runId(), player, exit,
                 s.arenaWins(), s.bossDefeated(), s.chests(), tier, kept ? "kept" : "stripped", stacks, online == null ? " (offline: swept on next login)" : "");
@@ -1570,6 +1578,68 @@ public final class OutbreakDive {
         host.level().sendParticles(ParticleTypes.ANGRY_VILLAGER, en.mob.getX(), en.mob.getY() + en.mob.getBbHeight(), en.mob.getZ(), 12, 0.5, 0.3, 0.5, 0.02);
         sound(en.mob.blockPosition(), SoundEvents.RAVAGER_ROAR, 0.9f, 0.7f);
     }
+
+    // ---- Pokémon in chests ------------------------------------------------------------------------------------
+
+    /**
+     * Lootr is filling this chest for this player: now and then it holds a Pokémon capsule. The chance comes from the chest (its
+     * rarity, or the set piece guarding it); the tier from the dive's difficulty and the chest's band. Only with Cobblemon.
+     */
+    List<net.minecraft.world.item.ItemStack> findsFor(ServerPlayer player, BlockPos pos) {
+        if (closed || settled.contains(player.getUUID()) || Capsules.releaser == null) return List.of();
+        Feature f = features.get(pos);
+        if (f == null || f.rarity == null) return List.of();
+        PokemonFinds.Source source = f.kind == FeaturePlanner.Kind.HOARD ? PokemonFinds.Source.ALPHA_HOARD
+                : f.kind == FeaturePlanner.Kind.NEST_CHEST ? PokemonFinds.Source.NEST_CACHE : PokemonFinds.Source.CHEST;
+        AuthoredLayout.Room room = roomOf(Vec3.atBottomCenterOf(pos));
+        int band = room == null ? 0 : host.layout().band(host.run().seed(), room);
+        PokemonFinds.Lists lists = host.layout().finds();
+        Random rng = host.random();
+        PokemonFinds.Find find;
+        PokemonFinds.Tier forced = forcedFinds.remove(player.getUUID());
+        if (forced != null) {
+            List<String> pool = lists.of(forced);
+            find = pool.isEmpty() ? null : new PokemonFinds.Find(forced, pool.get(rng.nextInt(pool.size())),
+                    forced == PokemonFinds.Tier.STANDARD ? lists.standardMin() : lists.levels().getOrDefault(forced, 10));
+        } else {
+            find = PokemonFinds.roll(rng, source, f.rarity, difficulty, band, lists);
+        }
+        if (find == null) return List.of();
+        String dungeon = host.layout().data().name == null ? host.layout().id() : host.layout().data().name;
+        var capsule = Capsules.make(find, PokemonFinds.floor(difficulty), tier(), player, dungeon, difficulty.label());
+        String name = Capsules.displayName(find.species());
+        found.computeIfAbsent(player.getUUID(), k -> new ArrayList<>()).add(new String[] {name + " (" + find.tier().label(), Capsules.read(capsule).getUUID("id").toString()});
+        // The big ones are news.
+        String who = player.getGameProfile().getName();
+        if (PokemonFinds.announcedToServer(find.tier())) {
+            Component c = Component.literal(who + " found a " + find.tier().label() + " " + name + " in " + dungeon + " on " + difficulty.label() + "!").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD);
+            for (ServerPlayer anyone : host.level().getServer().getPlayerList().getPlayers()) anyone.sendSystemMessage(c);
+        } else if (PokemonFinds.announcedToParty(find.tier())) {
+            host.say(who + " found a " + find.tier().label() + " " + name + "! Get it out safely.", ChatFormatting.LIGHT_PURPLE);
+        }
+        player.displayClientMessage(Component.literal("A Pokémon capsule: " + name + "!").withStyle(ChatFormatting.AQUA), true);
+        sound(pos, SoundEvents.AMETHYST_BLOCK_RESONATE, 1f, 1.2f);
+        AscensionDungeonsLog.LOG.info("[dive] run {} {} found {} {} (level {}) in a {} {} in band {} on {}", runId(), who, find.tier(), find.species(), find.level(), f.rarity, source, band, difficulty);
+        return List.of(capsule);
+    }
+
+    /** The Pokémon a player found this dive, each marked kept or lost, as the recap shows them. */
+    private List<String> foundFor(ServerPlayer p) {
+        List<String[]> mine = found.getOrDefault(p.getUUID(), List.of());
+        if (mine.isEmpty()) return List.of();
+        java.util.Set<String> carried = new java.util.HashSet<>();
+        for (net.minecraft.world.Container box : List.<net.minecraft.world.Container>of(p.getInventory(), p.getEnderChestInventory()))
+            for (int i = 0; i < box.getContainerSize(); i++) {
+                var c = Capsules.read(box.getItem(i));
+                if (c != null) carried.add(c.getUUID("id").toString());
+            }
+        List<String> out = new ArrayList<>();
+        for (String[] f : mine) out.add(f[0] + ", " + (carried.contains(f[1]) || Capsules.released(f[1]) ? "kept" : "lost") + ")");
+        return out;
+    }
+
+    /** Test aid: this player's next chest holds a Pokémon of this tier. */
+    public void forceFind(UUID player, PokemonFinds.Tier tier) { forcedFinds.put(player, tier); }
 
     /** Test aid: what tactics have done so far in this dive. */
     public String tacticsReport() {

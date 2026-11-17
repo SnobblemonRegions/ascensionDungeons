@@ -47,11 +47,18 @@ public final class Recap {
      * @param conquered     Outbreak Nests cleared and Alphas slain with them there
      */
     public record Facts(Way way, int stage, String stageName, long seconds, int chests, boolean reachedDepths, int itemsKept, int itemsLost, int winsKept, int winsLost,
-                        boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened, String deepest, int deepestBand, int conquered) {
+                        boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened, String deepest, int deepestBand, int conquered,
+                        List<String> found) {
+        /** Without the Pokémon found. */
+        public Facts(Way way, int stage, String stageName, long seconds, int chests, boolean reachedDepths, int itemsKept, int itemsLost, int winsKept, int winsLost,
+                     boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened, String deepest, int deepestBand, int conquered) {
+            this(way, stage, stageName, seconds, chests, reachedDepths, itemsKept, itemsLost, winsKept, winsLost, everBanked, knockedOutBy, bySpell, tollPercent, softened,
+                    deepest, deepestBand, conquered, List.of());
+        }
         /** Without the Depths' bands and set pieces, for callers that do not track them. */
         public Facts(Way way, int stage, String stageName, long seconds, int chests, boolean reachedDepths, int itemsKept, int itemsLost, int winsKept, int winsLost,
                      boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened) {
-            this(way, stage, stageName, seconds, chests, reachedDepths, itemsKept, itemsLost, winsKept, winsLost, everBanked, knockedOutBy, bySpell, tollPercent, softened, null, -1, 0);
+            this(way, stage, stageName, seconds, chests, reachedDepths, itemsKept, itemsLost, winsKept, winsLost, everBanked, knockedOutBy, bySpell, tollPercent, softened, null, -1, 0, List.of());
         }
     }
 
@@ -64,6 +71,7 @@ public final class Recap {
                 + (!f.reachedDepths() ? ". You did not go down to the Depths" : f.deepest() != null ? ". Deepest: " + f.deepest() : "")
                 + (f.conquered() > 0 ? ". Nests and Alphas beaten: " + f.conquered() : "") + ".");
         out.add("Kept: " + count(f.itemsKept(), "item") + ", " + count(f.winsKept(), "win") + ". Lost: " + count(f.itemsLost(), "item") + ", " + count(f.winsLost(), "win") + ".");
+        if (f.found() != null && !f.found().isEmpty()) out.add("Pokémon found: " + String.join(", ", f.found()) + ".");
         out.add("Tip: " + tip(f));
         return out;
     }

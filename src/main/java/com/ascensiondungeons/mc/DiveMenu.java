@@ -16,6 +16,8 @@ import net.minecraft.world.item.ItemStack;
 public final class DiveMenu extends ChestMenu {
     /** The party's item and the guide's, on the bottom row. */
     public static final int PARTY = 22, GUIDE = 26;
+    /** The four difficulty buttons, Casual to Nightmare, on the bottom row. */
+    public static final int DIFFICULTY = 18;
 
     private final IntConsumer onClick;
     /** The dungeon the player has been warned about and may confirm with a second click; -1 for none. */

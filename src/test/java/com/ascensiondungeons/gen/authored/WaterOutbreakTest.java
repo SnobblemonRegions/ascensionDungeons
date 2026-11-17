@@ -314,6 +314,31 @@ class WaterOutbreakTest {
         assertTrue(rarity[2] > rarity[1] && rarity[1] > rarity[0], "rarer chests deeper: " + java.util.Arrays.toString(rarity));
     }
 
+    /** Every type dungeon has Pokémon to find, a starter-tier and a pseudo-tier pick, and no line in two tiers. */
+    @Test
+    void everyTypeDungeonHasPokemonToFindInEachTier() {
+        for (String id : TYPES) {
+            var lists = AuthoredLayout.get(id).finds();
+            assertTrue(lists.of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.STANDARD).size() >= 5, id + " standard: " + lists.of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.STANDARD));
+            assertFalse(lists.of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.STARTER).isEmpty(), id + " starters");
+            assertFalse(lists.of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.PSEUDO).isEmpty(), id + " pseudo-legendaries or signatures");
+            Set<String> seen = new HashSet<>();
+            for (var tier : com.ascensiondungeons.outbreak.PokemonFinds.Tier.values())
+                for (String sp : lists.of(tier)) {
+                    assertTrue(sp.matches("[a-z0-9]+"), id + ": " + sp);
+                    assertTrue(seen.add(sp), id + ": " + sp + " is in two tiers");
+                }
+            assertTrue(lists.standardMin() >= 1 && lists.standardMax() >= lists.standardMin(), id);
+            assertEquals(10, lists.levels().get(com.ascensiondungeons.outbreak.PokemonFinds.Tier.STARTER), id);
+        }
+        // the restricted box legendaries are never in a dungeon
+        for (String id : TYPES) for (String sp : AuthoredLayout.get(id).finds().of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.LEGENDARY))
+            assertFalse(Set.of("mewtwo", "kyogre", "groudon", "rayquaza", "dialga", "palkia", "giratina", "lugia", "hooh", "zekrom", "reshiram", "kyurem").contains(sp), id + ": " + sp);
+        assertTrue(AuthoredLayout.get("dragon").finds().of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.PSEUDO).contains("dratini"));
+        assertFalse(AuthoredLayout.get("dragon").finds().of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.STANDARD).contains("dratini"), "a pseudo-legendary line is never a standard find");
+        assertTrue(AuthoredLayout.get("water").finds().of(com.ascensiondungeons.outbreak.PokemonFinds.Tier.STARTER).contains("squirtle"));
+    }
+
     @Test
     void theSamePlanComesBackForTheSameSeed() {
         AuthoredLayout water = AuthoredLayout.get("water");

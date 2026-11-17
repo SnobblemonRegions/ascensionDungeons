@@ -42,6 +42,11 @@ public final class RunLoot {
     public static volatile ChestListener chestListener;
     public static volatile PartyItems partyItems;
 
+    /** Extra items a dive puts in a chest for one player as Lootr rolls it (a Pokémon capsule, now and then). */
+    public interface ExtraLoot { List<ItemStack> extra(UUID run, ServerPlayer player, BlockPos chest); }
+
+    public static volatile ExtraLoot extraLoot;
+
     private RunLoot() {}
 
     /** The dive run that owns this dimension, or null (not a dive level, or no server). */

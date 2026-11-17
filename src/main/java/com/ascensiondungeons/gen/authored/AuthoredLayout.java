@@ -400,6 +400,33 @@ public final class AuthoredLayout {
     private final Map<Long, java.util.List<com.ascensiondungeons.outbreak.FeaturePlanner.Placement>> featureCache = new HashMap<>();
     private final Map<Long, java.util.List<com.ascensiondungeons.outbreak.SetPieces.Piece>> pieceCache = new HashMap<>();
 
+    private com.ascensiondungeons.outbreak.PokemonFinds.Lists finds;
+
+    /** The Pokémon this dungeon's chests can hold, by tier ({@code finds.json} beside the layout); empty lists when it has none. */
+    public synchronized com.ascensiondungeons.outbreak.PokemonFinds.Lists finds() {
+        if (finds != null) return finds;
+        java.util.Map<String, java.util.List<String>> byName = new HashMap<>();
+        java.util.Map<String, Integer> levels = new HashMap<>();
+        int min = 5, max = 20;
+        try (var in = AuthoredLayout.class.getResourceAsStream("/data/ascensiondungeons/dungeons/" + data.id + "/finds.json")) {
+            if (in != null) {
+                JsonObject o = com.google.gson.JsonParser.parseReader(new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+                for (String key : new String[] {"standard", "starter", "pseudo", "legendary", "mythical"}) {
+                    java.util.List<String> names = new java.util.ArrayList<>();
+                    for (JsonElement e : Jx.a(o, key)) names.add(e.getAsString());
+                    byName.put(key, names);
+                    if (o.has(key + "Level")) levels.put(key + "Level", o.get(key + "Level").getAsInt());
+                }
+                JsonArray range = Jx.a(o, "standardLevels");
+                if (range.size() == 2) { min = range.get(0).getAsInt(); max = range.get(1).getAsInt(); }
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            com.ascensiondungeons.AscensionDungeonsLog.LOG.warn("Dungeon {} finds.json could not be read; its chests hold no Pokémon", data.id, e);
+        }
+        finds = com.ascensiondungeons.outbreak.PokemonFinds.lists(byName, min, max, levels);
+        return finds;
+    }
+
     /** This run's set pieces in the Depths (nests, alphas, hazard rooms); empty when the dungeon has none. */
     public synchronized java.util.List<com.ascensiondungeons.outbreak.SetPieces.Piece> setPieces(long seed) {
         features(seed);

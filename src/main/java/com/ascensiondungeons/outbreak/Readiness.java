@@ -38,7 +38,7 @@ public final class Readiness {
         public int strongest() { int best = 0; for (int l : levels) best = Math.max(best, l); return best; }
     }
 
-    public enum Concern { NO_POKEMON, ALL_FAINTED, UNDER_LEVELLED, INVENTORY_FULL, HIGH_TIER_FIRST_DIVE }
+    public enum Concern { NO_POKEMON, ALL_FAINTED, UNDER_LEVELLED, INVENTORY_FULL, HIGH_TIER_FIRST_DIVE, HARD_FIRST_DIVE }
 
     /** Fewer free slots than this and loot will not fit. */
     public static final int ROOM_WANTED = 6;
@@ -52,7 +52,20 @@ public final class Readiness {
      * @param rookie     the player has never extracted
      * @param gentlest   the gentlest dungeon on offer, recommended for a first dive (null when there is nothing to recommend)
      */
-    public static Verdict assess(Card card, Team team, boolean rookie, Card gentlest) {
+    public static Verdict assess(Card card, Team team, boolean rookie, Card gentlest) { return assess(card, team, rookie, gentlest, Tactics.Difficulty.NORMAL); }
+
+    /** As above, at the difficulty the leader chose: a first dive on Hard or Nightmare is worth a word too. */
+    public static Verdict assess(Card card, Team team, boolean rookie, Card gentlest, Tactics.Difficulty difficulty) {
+        Verdict v = assess0(card, team, rookie, gentlest);
+        if (!rookie || difficulty.ordinal() < Tactics.Difficulty.HARD.ordinal()) return v;
+        List<Concern> concerns = new ArrayList<>(v.concerns());
+        List<String> lines = new ArrayList<>(v.lines());
+        concerns.add(Concern.HARD_FIRST_DIVE);
+        lines.add("This would be your first dive, on " + difficulty.label() + ". Enemies flank and focus the hurt, and bosses charge. Normal is what a first dive is made for.");
+        return new Verdict(List.copyOf(concerns), List.copyOf(lines));
+    }
+
+    private static Verdict assess0(Card card, Team team, boolean rookie, Card gentlest) {
         List<Concern> concerns = new ArrayList<>();
         List<String> lines = new ArrayList<>();
         if (team.known()) {

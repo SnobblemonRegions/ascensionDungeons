@@ -336,6 +336,34 @@ public final class DiveE2E {
                         && menu.getSlot(com.ascensiondungeons.mc.DiveMenu.PARTY).getItem().getHoverName().getString().equals("Diving alone");
             }
         }));
+        steps.add(new Step("the leader picks a difficulty in the picker: four buttons, Normal chosen at first, and Hard is written on every dungeon and warned about for a first dive", 60, new BooleanSupplier() {
+            int phase;
+            @Override public boolean getAsBoolean() {
+                if (!(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu menu)) return false;
+                int base = com.ascensiondungeons.mc.DiveMenu.DIFFICULTY;
+                if (phase == 0) {
+                    String normal = menu.getSlot(base + 1).getItem().getHoverName().getString(), hard = menu.getSlot(base + 2).getItem().getHoverName().getString();
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E difficulty buttons: {} | {} | {} | {}", menu.getSlot(base).getItem().getHoverName().getString(), normal, hard,
+                            menu.getSlot(base + 3).getItem().getHoverName().getString());
+                    if (!normal.equals("» Normal «") || !hard.equals("Hard")) throw new IllegalStateException("Normal should be chosen at first");
+                    menu.clicked(base + 2, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);
+                    phase = 1;
+                    return false;
+                }
+                if (phase == 1) {
+                    String water = String.join(" ", lore(menu.getSlot(slotOf(menu, "The Drowned Reservoir")).getItem()));
+                    boolean hardShown = menu.getSlot(base + 2).getItem().getHoverName().getString().equals("» Hard «") && water.contains("Difficulty: Hard") && water.contains("first dive, on Hard");
+                    String hardLore = String.join(" ", lore(menu.getSlot(base + 2).getItem()));
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E Hard chosen: water says {}; Hard says {}", water, hardLore);
+                    if (!hardShown || !hardLore.contains("pseudo-legendaries")) throw new IllegalStateException("Hard was not shown as chosen");
+                    menu.clicked(base + 1, 0, net.minecraft.world.inventory.ClickType.PICKUP, bot);    // back to Normal for this first dive
+                    phase = 2;
+                    return false;
+                }
+                return menu.getSlot(base + 1).getItem().getHoverName().getString().equals("» Normal «")
+                        && String.join(" ", lore(menu.getSlot(slotOf(menu, "The Drowned Reservoir")).getItem())).contains("Difficulty: Normal");
+            }
+        }));
         steps.add(new Step("picking a harder dungeon for a first dive warns once, takes nothing, and goes in on the second click", 60, new BooleanSupplier() {
             int phase;
             int before;
@@ -357,7 +385,7 @@ public final class DiveE2E {
                     phase = 2;
                     return false;
                 }
-                return manager.get().runOf(ID).map(r -> "water".equals(r.dungeonType())).orElse(false) && heard("Entering The Drowned Reservoir (Water, tier 3).")
+                return manager.get().runOf(ID).map(r -> "water".equals(r.dungeonType())).orElse(false) && heard("Entering The Drowned Reservoir (Water, tier 3, Normal).")
                         && !(bot.containerMenu instanceof com.ascensiondungeons.mc.DiveMenu);
             }
         }));
@@ -495,7 +523,8 @@ public final class DiveE2E {
                     }
                     return false;
                 }
-                if (nearest.getY() > top.getY() - 5 || nearest.distanceToSqr(bot) > 6 * 6) return false;
+                // Within reach to fight: a ranged Pokémon keeps about seven blocks off by design.
+                if (nearest.getY() > top.getY() - 5 || nearest.distanceToSqr(bot) > 9 * 9) return false;
                 AscensionDungeonsLog.LOG.info("DIVE-E2E {} ({}) came down the stairway from the dungeon floor (y {}) to {} beside the player at {}", nearest.getName().getString(),
                         nearest.getClass().getSimpleName(), top.getY(), nearest.blockPosition().toShortString(), bot.blockPosition().toShortString());
                 return true;
@@ -780,11 +809,22 @@ public final class DiveE2E {
 
     private static String alphaRoom;
 
+    /** The first Pokémon capsule in the stand-in player's inventory, or null. */
+    private static ItemStack capsule() {
+        for (int i = 0; i < bot.getInventory().getContainerSize(); i++) {
+            ItemStack s = bot.getInventory().getItem(i);
+            if (com.ascensiondungeons.mc.Capsules.read(s) != null) return s;
+        }
+        return null;
+    }
+
     private static void teleport(int x, int y, int z) { bot.teleportTo((ServerLevel) bot.level(), x + 0.5, y, z + 0.5, 0f, 0f); }
 
     /** The Depths' bands and set pieces, in one dive: a band's name on screen, a nest cleared, an Alpha slain, a hazard room. */
     private static void depthSteps(Supplier<RunManager> manager, String label) {
-        addRun(manager, label);
+        addRun(manager, label, "water", "hard");
+        steps.add(new Step(label + ": the run is on the difficulty it was asked for, and says so at the door", 40, () ->
+                dive().difficulty() == com.ascensiondungeons.outbreak.Tactics.Difficulty.HARD && heard("Difficulty: Hard")));
         steps.add(new Step(label + ": the Depths hold two nests, two Alphas in the deep band, and three hazard rooms, with each nest's heart built in the world", 40, () -> {
             List<String> lines = dive().pieceLines();
             AscensionDungeonsLog.LOG.info("DIVE-E2E set pieces: {}", lines);
@@ -974,6 +1014,54 @@ public final class DiveE2E {
                 return markedItems() > 0;
             }
         }));
+        steps.add(new Step(label + ": a chest can hold a Pokémon capsule: run loot, bound to its finder, and the party hears of a pseudo-legendary", 200, new BooleanSupplier() {
+            boolean used;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                if (!used) {
+                    chat.clear();
+                    for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
+                    dive().forceFind(ID, com.ascensiondungeons.outbreak.PokemonFinds.Tier.PSEUDO);
+                    use(freshChest());
+                    used = true;
+                    return false;
+                }
+                if (!takeAll()) return false;
+                ItemStack capsule = capsule();
+                if (capsule == null) throw new IllegalStateException("no capsule in the chest: " + describeInventory());
+                var c = com.ascensiondungeons.mc.Capsules.read(capsule);
+                AscensionDungeonsLog.LOG.info("DIVE-E2E capsule: {} ({}), data {}, lore {}", capsule.getHoverName().getString(),
+                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(capsule.getItem()), c, lore(capsule));
+                return RunLoot.runOf(capsule) != null && c.getUUID("owner").equals(ID) && c.getString("tier").equals("PSEUDO")
+                        && List.of("lapras", "feebas").contains(c.getString("species")) && c.getString("floor").equals("rare")
+                        && capsule.getHoverName().getString().startsWith("Capsule: ") && heard("found a Pseudo-legendary");
+            }
+        }));
+        steps.add(new Step(label + ": a capsule cannot be released while it is at risk", 20, () -> {
+            ItemStack capsule = capsule();
+            var r = com.ascensiondungeons.mc.Capsules.use(bot, capsule);
+            return r == net.minecraft.world.InteractionResult.FAIL && capsule() != null && capsule().getCount() == 1;
+        }));
+        steps.add(new Step(label + ": banked, the capsule releases its Pokémon to the finder's team" + (FabricLoader.getInstance().isModLoaded("cobblemon") ? "" : " (needs Cobblemon)"), 40, new BooleanSupplier() {
+            String species;
+            net.minecraft.world.InteractionResult result;
+            @Override public boolean getAsBoolean() {
+                if (!FabricLoader.getInstance().isModLoaded("cobblemon")) return true;
+                if (result == null) {
+                    dive().operatorCheckpoint();
+                    ItemStack capsule = capsule();
+                    if (capsule == null || RunLoot.runOf(capsule) != null) return false;
+                    species = com.ascensiondungeons.mc.Capsules.read(capsule).getString("species");
+                    int before = Party.size(bot);
+                    chat.clear();
+                    result = com.ascensiondungeons.mc.Capsules.use(bot, capsule);
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E released {}: {}, party {} -> {}", species, result, before, Party.size(bot));
+                    return false;
+                }
+                // the message is read off the connection on the next tick
+                return result == net.minecraft.world.InteractionResult.SUCCESS && capsule() == null && Party.has(bot, species) && heard("joined your team!");
+            }
+        }));
         steps.add(new Step(label + ": an Outbreak Nest wakes when the player comes near, sends its waves one after another, and opens its cache when cleared", 2400, new BooleanSupplier() {
             boolean moved, opened;
             int lastWave;
@@ -1127,6 +1215,12 @@ public final class DiveE2E {
                 return heard("You left without extracting.") && heard2("You left without extracting.") && heard("Dive recap: The Hearthwarden Village") && heard2("Dive recap: The Hearthwarden Village")
                         && com.ascensiondungeons.mc.DiveEntry.current.party(ID).size() == 2;
             }
+        }));
+        steps.add(new Step("a capsule is bound: another player cannot release it", 20, () -> {
+            ItemStack c = com.ascensiondungeons.mc.Capsules.make(new com.ascensiondungeons.outbreak.PokemonFinds.Find(com.ascensiondungeons.outbreak.PokemonFinds.Tier.STANDARD, "psyduck", 12),
+                    "uncommon", 3, bot, "The Drowned Reservoir", "Normal");
+            var r = com.ascensiondungeons.mc.Capsules.use(bot2, c);
+            return r == net.minecraft.world.InteractionResult.FAIL && c.getCount() == 1;
         }));
         steps.add(new Step("the leader leaving ends the party for both", 20, () -> {
             command("dive leave");
@@ -1317,13 +1411,15 @@ public final class DiveE2E {
         }
     }
 
-    private static void addRun(Supplier<RunManager> manager, String label, String type) {
-        steps.add(new Step(label + ": a " + type + " run is accepted", 40, new BooleanSupplier() {
+    private static void addRun(Supplier<RunManager> manager, String label, String type) { addRun(manager, label, type, null); }
+
+    private static void addRun(Supplier<RunManager> manager, String label, String type, String difficulty) {
+        steps.add(new Step(label + ": a " + type + " run is accepted" + (difficulty == null ? "" : " on " + difficulty), 40, new BooleanSupplier() {
             Run run;
             @Override public boolean getAsBoolean() {
                 if (run == null) {
                     opened.clear();
-                    var result = manager.get().request(Set.of(ID), type);
+                    var result = manager.get().request(Set.of(ID), type, difficulty);
                     if (!result.ok()) throw new IllegalStateException("request refused: " + result.error());
                     run = result.run();
                 }
@@ -1431,6 +1527,21 @@ public final class DiveE2E {
         static boolean secondIsEmpty() { return ((com.cobblemon.mod.common.pokemon.Pokemon) secondPokemon).heldItem().isEmpty(); }
 
         /** The second Pokémon still holds its item and the item is no longer marked. Takes the item away again for the next run. */
+        static int size(ServerPlayer player) {
+            int n = 0;
+            for (var p : com.cobblemon.mod.common.Cobblemon.INSTANCE.getStorage().getParty(player)) if (p != null) n++;
+            return n;
+        }
+
+        /** The party or the PC holds a Pokémon of this species. */
+        static boolean has(ServerPlayer player, String species) {
+            for (var p : com.cobblemon.mod.common.Cobblemon.INSTANCE.getStorage().getParty(player))
+                if (p != null && p.getSpecies().getName().toLowerCase(java.util.Locale.ROOT).equals(species)) return true;
+            for (var p : com.cobblemon.mod.common.Cobblemon.INSTANCE.getStorage().getPC(player))
+                if (p != null && p.getSpecies().getName().toLowerCase(java.util.Locale.ROOT).equals(species)) return true;
+            return false;
+        }
+
         static boolean secondKeptBanked() {
             var second = (com.cobblemon.mod.common.pokemon.Pokemon) secondPokemon;
             boolean ok = !second.heldItem().isEmpty() && RunLoot.runOf(second.heldItem()) == null;

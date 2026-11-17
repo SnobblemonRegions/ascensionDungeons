@@ -49,6 +49,11 @@ public final class Run {
     public long seed() { return seed; }
     /** Null for a district run; otherwise {@code cinderforge}, an authored dungeon id, or a type-pilot id. */
     public String dungeonType() { return dungeonType; }
+
+    private String difficulty;
+    /** The difficulty the party's leader chose for this run, or null for the server's default. */
+    public String difficulty() { return difficulty; }
+    void difficulty(String d) { this.difficulty = d; }
     public Map<UUID, Member> members() { return membersView; }
     public long createdAt() { return createdAt; }
     public RunState state() { return state; }

@@ -95,6 +95,12 @@ _Avoid_: requirement, gate, lock.
 
 **Party**: The players who go into a dive together: a leader and the guests who accepted their invitation. Also Cobblemon's word for a player's six Pokémon; say "team" for that here.
 
+**Capsule**: A Pokémon found in a dive chest, carried as an item: dive loot until banked or carried out, bound to its finder, released by using it.
+_Avoid_: egg, ball, spawn.
+
+**Find tier**: What kind of Pokémon a capsule holds: standard, starter, pseudo-legendary, legendary or mythical. Not AscensionLib's ascension rarity, which grades the individual.
+_Avoid_: rarity (taken twice already: chest rarity and ascension rarity).
+
 **Recap**: What a player is told as a dive ends: how it ended, what they kept and lost, and a tip.
 _Avoid_: summary, results screen.
 

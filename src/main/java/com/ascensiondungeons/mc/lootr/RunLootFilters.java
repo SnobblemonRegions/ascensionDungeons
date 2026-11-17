@@ -32,6 +32,12 @@ public final class RunLootFilters implements ILootrFilterProvider {
                 if (state == null || state.provider() == null) return false;
                 UUID run = RunLoot.runOf(state.provider().getInfoDimension());
                 if (run == null) return false;
+                // The dive may add something of its own to this player's chest (a Pokémon capsule); it is run loot like the rest.
+                RunLoot.ExtraLoot extra = RunLoot.extraLoot;
+                if (extra != null && state.player() instanceof net.minecraft.server.level.ServerPlayer finder) {
+                    try { stacks.addAll(extra.extra(run, finder, state.provider().getInfoPos())); }
+                    catch (RuntimeException e) { AscensionDungeonsLog.LOG.error("[run-loot] extra loot failed; the chest is filled as usual", e); }
+                }
                 for (ItemStack stack : stacks) RunLoot.tag(stack, run);
                 AscensionDungeonsLog.LOG.info("[run-loot] tagged {} stack(s) from {} for {} in run {} at {}", stacks.size(), state.lootTableKey() == null ? "?" : state.lootTableKey().location(),
                         state.player() == null ? "?" : state.player().getGameProfile().getName(), run, state.provider().getInfoPos());

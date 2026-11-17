@@ -52,6 +52,20 @@ public final class AscensionDungeons implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, env) ->
                 new DungeonCommands(() -> manager).register(dispatcher));
 
+        // A Pokémon capsule is used, not thrown: right-clicking the air or a block releases it (or says why not).
+        net.fabricmc.fabric.api.event.player.UseItemCallback.EVENT.register((player, world, hand) -> {
+            var stack = player.getItemInHand(hand);
+            if (world.isClientSide() || !(player instanceof net.minecraft.server.level.ServerPlayer sp)) return net.minecraft.world.InteractionResultHolder.pass(stack);
+            var r = com.ascensiondungeons.mc.Capsules.use(sp, stack);
+            return r == null ? net.minecraft.world.InteractionResultHolder.pass(stack)
+                    : r == net.minecraft.world.InteractionResult.SUCCESS ? net.minecraft.world.InteractionResultHolder.success(stack) : net.minecraft.world.InteractionResultHolder.fail(stack);
+        });
+        net.fabricmc.fabric.api.event.player.UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
+            if (world.isClientSide() || !(player instanceof net.minecraft.server.level.ServerPlayer sp)) return net.minecraft.world.InteractionResult.PASS;
+            if (com.ascensiondungeons.mc.Capsules.read(player.getItemInHand(hand)) == null) return net.minecraft.world.InteractionResult.PASS;
+            var r = com.ascensiondungeons.mc.Capsules.use(sp, player.getItemInHand(hand));
+            return r == null ? net.minecraft.world.InteractionResult.PASS : r;
+        });
         // A player who logs off leaves their dive party, and invitations to or from them are dropped.
         net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             com.ascensiondungeons.mc.DiveEntry entry = com.ascensiondungeons.mc.DiveEntry.current;
@@ -74,6 +88,7 @@ public final class AscensionDungeons implements ModInitializer {
             systems.add(auth);
             com.ascensiondungeons.mc.RunLoot.runOfDimension = auth::diveRunOf;
             com.ascensiondungeons.mc.RunLoot.chestListener = auth::chestLooted;
+            com.ascensiondungeons.mc.RunLoot.extraLoot = auth::extraLoot;
             com.ascensiondungeons.mc.AuthoredBridges.PokemonSpawner pk = FabricLoader.getInstance().isModLoaded("cobblemon") ? newPokemonSpawner() : null;
             com.ascensiondungeons.mc.AuthoredBridges.RaidBridge rb = FabricLoader.getInstance().isModLoaded("cobbleraids") ? newRaidBridge(cfg) : null;
             com.ascensiondungeons.mc.AuthoredBridges.Ascension asc = FabricLoader.getInstance().isModLoaded("ascensionlib") ? com.ascensiondungeons.mc.AscensionBridge.tryCreate() : null;
@@ -83,6 +98,7 @@ public final class AscensionDungeons implements ModInitializer {
                 com.ascensiondungeons.mc.RunLoot.PartyItems items = newPartyItems();
                 com.ascensiondungeons.mc.RunLoot.partyItems = items;
                 com.ascensiondungeons.mc.DiveEntry.teamInfo = (com.ascensiondungeons.mc.DiveEntry.TeamInfo) items;
+                com.ascensiondungeons.mc.Capsules.releaser = newReleaser();
             }
             com.ascensiondungeons.mc.DiveEntry.current = new com.ascensiondungeons.mc.DiveEntry(server, () -> manager, cfg);
             auth.bridges(cfg, pk, rb, asc, combat);
@@ -129,6 +145,8 @@ public final class AscensionDungeons implements ModInitializer {
             com.ascensiondungeons.mc.RunLoot.runOfDimension = null;
             com.ascensiondungeons.mc.RunLoot.chestListener = null;
             com.ascensiondungeons.mc.RunLoot.partyItems = null;
+            com.ascensiondungeons.mc.RunLoot.extraLoot = null;
+            com.ascensiondungeons.mc.Capsules.releaser = null;
             com.ascensiondungeons.mc.DiveEntry.teamInfo = null;
             com.ascensiondungeons.mc.DiveEntry.current = null;
             arenas = java.util.List.of();
@@ -139,6 +157,8 @@ public final class AscensionDungeons implements ModInitializer {
     private com.ascensiondungeons.mc.AuthoredBridges.PokemonSpawner newPokemonSpawner() { return new com.ascensiondungeons.mc.AuthoredPokemon(); }
 
     private com.ascensiondungeons.mc.RunLoot.PartyItems newPartyItems() { return new com.ascensiondungeons.mc.AuthoredPartyItems(); }
+
+    private com.ascensiondungeons.mc.Capsules.Releaser newReleaser() { return new com.ascensiondungeons.mc.CapsuleRelease(); }
 
     private com.ascensiondungeons.mc.AuthoredBridges.Combat newCombat(RunConfig cfg) { return new com.ascensiondungeons.mc.AuthoredCombat(cfg.combatFaintSeconds, cfg.combatDamageMultiplier, cfg.moveCooldownBaseSeconds, cfg.moveCooldownSecondsPerPower); }
 

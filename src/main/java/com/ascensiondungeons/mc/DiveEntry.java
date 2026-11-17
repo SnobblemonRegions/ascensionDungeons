@@ -51,6 +51,16 @@ public final class DiveEntry {
     private final RunConfig cfg;
     private final PartyBook book;
     private List<Readiness.Card> cards;
+    /** The difficulty each leader has chosen in the picker; the server's default until they choose. */
+    private final java.util.Map<UUID, com.ascensiondungeons.outbreak.Tactics.Difficulty> chosen = new java.util.HashMap<>();
+
+    /** The difficulty this leader's next dive will be at. */
+    public com.ascensiondungeons.outbreak.Tactics.Difficulty difficulty(ServerPlayer leader) {
+        return chosen.getOrDefault(leader.getUUID(), com.ascensiondungeons.outbreak.Tactics.Difficulty.parse(cfg.diveDifficulty, com.ascensiondungeons.outbreak.Tactics.Difficulty.NORMAL));
+    }
+
+    /** The leader picks the difficulty for their party's next dive. */
+    public void choose(ServerPlayer leader, com.ascensiondungeons.outbreak.Tactics.Difficulty d) { chosen.put(leader.getUUID(), d); }
 
     public DiveEntry(MinecraftServer server, Supplier<RunManager> manager, RunConfig cfg) {
         this.server = server;
@@ -95,18 +105,22 @@ public final class DiveEntry {
     private boolean rookie(ServerPlayer p) { return !OnboardingStore.of(server).progress(p.getUUID()).graduated(); }
 
     /** The check at the door for one player and one dungeon. */
-    public Readiness.Verdict verdict(ServerPlayer p, Readiness.Card card) {
-        return Readiness.assess(card, team(p), rookie(p), Readiness.gentlest(cards()));
+    public Readiness.Verdict verdict(ServerPlayer p, Readiness.Card card) { return verdict(p, card, com.ascensiondungeons.outbreak.Tactics.Difficulty.NORMAL); }
+
+    /** The check at the door at a difficulty. */
+    public Readiness.Verdict verdict(ServerPlayer p, Readiness.Card card, com.ascensiondungeons.outbreak.Tactics.Difficulty d) {
+        return Readiness.assess(card, team(p), rookie(p), Readiness.gentlest(cards()), d);
     }
 
     /** Everything worth saying before this party goes into this dungeon: the leader's own concerns, then each guest's by name. */
     public List<String> concerns(ServerPlayer leader, Readiness.Card card) {
-        List<String> out = new ArrayList<>(verdict(leader, card).lines());
+        var d = difficulty(leader);
+        List<String> out = new ArrayList<>(verdict(leader, card, d).lines());
         for (UUID id : book.party(leader.getUUID())) {
             if (id.equals(leader.getUUID())) continue;
             ServerPlayer guest = server.getPlayerList().getPlayer(id);
             if (guest == null) { out.add("A player in your party is offline."); continue; }
-            for (String line : verdict(guest, card).lines()) out.add(guest.getGameProfile().getName() + ": " + line);
+            for (String line : verdict(guest, card, d).lines()) out.add(guest.getGameProfile().getName() + ": " + line);
         }
         return out;
     }
@@ -144,7 +158,29 @@ public final class DiveEntry {
         lore.add("They join with /dive accept.");
         box.setItem(DiveMenu.PARTY, item(Items.PLAYER_HEAD, party.size() == 1 ? "Diving alone" : "Your party: " + party.size() + " players", ChatFormatting.AQUA, lore, ChatFormatting.GRAY, false));
         box.setItem(DiveMenu.GUIDE, item(Items.BOOK, "Dive guide", ChatFormatting.GOLD, List.of("How a dive works, lesson by lesson.", "Click to open, or use /dungeon guide."), ChatFormatting.GRAY, false));
+        // The leader's difficulty: four buttons, the chosen one shining.
+        var now = difficulty(p);
+        for (var d : com.ascensiondungeons.outbreak.Tactics.Difficulty.values()) {
+            List<String> about = new ArrayList<>(DIFFICULTY_LORE.get(d));
+            about.add("");
+            about.add(d == now ? "Chosen for your party's next dive." : "Click to choose.");
+            ChatFormatting colour = switch (d) { case CASUAL -> ChatFormatting.GREEN; case NORMAL -> ChatFormatting.YELLOW; case HARD -> ChatFormatting.RED; case NIGHTMARE -> ChatFormatting.DARK_PURPLE; };
+            box.setItem(DiveMenu.DIFFICULTY + d.ordinal(), item(DIFFICULTY_ICONS[d.ordinal()], (d == now ? "» " : "") + d.label() + (d == now ? " «" : ""), colour, about, ChatFormatting.GRAY, d == now));
+        }
     }
+
+    private static final Item[] DIFFICULTY_ICONS = {Items.WOODEN_SWORD, Items.IRON_SWORD, Items.DIAMOND_SWORD, Items.NETHERITE_SWORD};
+
+    /** What each difficulty means, in the picker: how enemies fight, and what Pokémon its chests can hold. */
+    static final java.util.Map<com.ascensiondungeons.outbreak.Tactics.Difficulty, List<String>> DIFFICULTY_LORE = java.util.Map.of(
+            com.ascensiondungeons.outbreak.Tactics.Difficulty.CASUAL, List.of("At most two enemies on you at once.", "No flanking, no charges.",
+                    "Chests can rarely hold: standard Pokémon."),
+            com.ascensiondungeons.outbreak.Tactics.Difficulty.NORMAL, List.of("What a dive is made for: plain in the first rooms,", "sharper deeper down.",
+                    "Chests can rarely hold: standard Pokémon, starters.", "Found Pokémon are at least Uncommon."),
+            com.ascensiondungeons.outbreak.Tactics.Difficulty.HARD, List.of("Enemies flank, focus the hurt and fall back.", "Bosses charge more often.",
+                    "Chests can rarely hold: standard, starters,", "pseudo-legendaries. At least Rare."),
+            com.ascensiondungeons.outbreak.Tactics.Difficulty.NIGHTMARE, List.of("Everything Hard does, with more pressure", "and shorter warnings.",
+                    "Chests can rarely hold: standard, starters,", "pseudo-legendaries. At least Epic.", "In the Deep band only: legendary and mythical,", "very rarely."));
 
     private ItemStack dungeonItem(ServerPlayer p, Readiness.Card card, boolean recommended, boolean armed) {
         List<String> concerns = concerns(p, card);
@@ -153,6 +189,7 @@ public final class DiveEntry {
         lore.add(line("Enemies: level " + card.minLevel() + " to " + card.maxLevel(), ChatFormatting.GRAY));
         lore.add(line("Gatekeeper: level " + card.keeperLevel() + " and up", ChatFormatting.GRAY));
         lore.add(line("Up to " + card.minutes() + " minutes", ChatFormatting.GRAY));
+        lore.add(line("Difficulty: " + difficulty(p).label(), ChatFormatting.GRAY));
         lore.add(Component.empty());
         if (recommended) lore.add(line("Recommended for your first dive", ChatFormatting.GREEN));
         if (concerns.isEmpty()) lore.add(line("You look ready.", ChatFormatting.GREEN));
@@ -212,6 +249,15 @@ public final class DiveEntry {
             server.execute(() -> { p.closeContainer(); GuideMenu.open(p, OnboardingStore.of(server).progress(p.getUUID()), 35); });
             return;
         }
+        if (slot >= DiveMenu.DIFFICULTY && slot < DiveMenu.DIFFICULTY + 4) {
+            var d = com.ascensiondungeons.outbreak.Tactics.Difficulty.values()[slot - DiveMenu.DIFFICULTY];
+            choose(p, d);
+            menu.armed = -1;
+            p.displayClientMessage(Component.literal("Difficulty for your party's next dive: " + d.label()).withStyle(ChatFormatting.GOLD), true);
+            fill(p, box, -1);
+            menu.sendAllDataToRemote();
+            return;
+        }
         List<Readiness.Card> all = cards();
         if (slot < 0 || slot >= all.size() || slot >= 18) return;
         Readiness.Card card = all.get(slot);
@@ -236,14 +282,15 @@ public final class DiveEntry {
         if (!book.leads(leader.getUUID())) return tell(leader, "Only your party's leader can start the dive.");
         Set<UUID> party = book.party(leader.getUUID());
         for (UUID id : party) if (server.getPlayerList().getPlayer(id) == null) return tell(leader, "A player in your party is offline. /dive party shows who; they can be dropped with /dive leave on their side, or start again with /dive leave.");
-        StartResult result = m.request(party, card.id());
+        var difficulty = difficulty(leader);
+        StartResult result = m.request(party, card.id(), difficulty.name().toLowerCase(java.util.Locale.ROOT));
         if (!result.ok()) return tell(leader, result.error());
         for (UUID id : party) {
             ServerPlayer member = server.getPlayerList().getPlayer(id);
             if (member != null) member.sendSystemMessage(Component.literal((party.size() == 1 ? "Entering " : leader.getGameProfile().getName() + " is taking the party into ") + card.name()
-                    + " (" + card.typeName() + ", tier " + card.tier() + "). Building it takes a moment.").withStyle(ChatFormatting.AQUA));
+                    + " (" + card.typeName() + ", tier " + card.tier() + ", " + difficulty.label() + "). Building it takes a moment.").withStyle(ChatFormatting.AQUA));
         }
-        AscensionDungeonsLog.LOG.info("[dive] {} started {} for a party of {} (run {})", leader.getGameProfile().getName(), card.id(), party.size(), result.run().id());
+        AscensionDungeonsLog.LOG.info("[dive] {} started {} on {} for a party of {} (run {})", leader.getGameProfile().getName(), card.id(), difficulty.label(), party.size(), result.run().id());
         return null;
     }
 

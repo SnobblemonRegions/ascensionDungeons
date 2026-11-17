@@ -62,6 +62,8 @@ async function walkTo(bot, x, y, z, range, ms = 150000) {
   let result = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     await cmd(bot, '/kill @e[type=!minecraft:player,type=!minecraft:text_display,type=!minecraft:item_display,type=!minecraft:item,distance=..48]', 600);
+    // ...and what they dropped, or the bot picks it up on the way and later item counts are off by it
+    await cmd(bot, '/kill @e[type=minecraft:item,distance=..48]', 300);
     await cmd(bot, '/effect clear @s minecraft:levitation', 300);
     for (let i = 0; i < 20 && !bot.entity.onGround; i++) await sleep(250);
     // After a /tp the bot library goes on sending its old position for a while and the server puts it back each time (the
@@ -146,7 +148,7 @@ async function enterByPicker(bot) {
   try { await bot.clickWindow(water.i, 0, 0); } catch (e) {}
   let active = false;
   for (let i = 0; i < 60 && !active; i++) { const s = await cmd(bot, '/dungeon status', 1000); active = /ACTIVE/.test(s); }
-  check('A the second click goes in', active && bot.log.slice(n2).some(l => /Entering The Drowned Reservoir \(Water, tier 3\)/.test(l)), bot.log.slice(n2).filter(l => /Entering/.test(l))[0]);
+  check('A the second click goes in', active && bot.log.slice(n2).some(l => /Entering The Drowned Reservoir \(Water, tier 3, Normal\)/.test(l)), bot.log.slice(n2).filter(l => /Entering/.test(l))[0]);
   return finishStart(bot, 'picker');
 }
 async function startRun(bot) {
@@ -272,6 +274,7 @@ async function confirmPay(bot, since) {
     check('A the Guide bar now asks the player to get out', /^Guide: Get back to the extraction portal and leave/.test(guideBar() || ''), guideBar());
     // extraction: the screen shows exactly what the toll would take. This is the player's first extraction, so it is free.
     const portal = kinds('PORTAL')[0];
+    await cmd(bot, `/kill @e[type=minecraft:item,x=${portal.x},y=${portal.y},z=${portal.z},distance=..24]`, 300);
     const before4 = await inv(bot);
     const toll = await tollWindow(bot, portal);
     const expected = Math.max(1, Math.round(before4.markedTotal * 0.35));

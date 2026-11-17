@@ -111,4 +111,15 @@ class RecapTest {
         // the old form still reads as before
         assertEquals("Outbreak: stage 2 (Agitated) after 12m 34s. Chests opened: 4.", Recap.lines("X", facts(Way.TOLL, 2, 4, true, 3, 1, 0, 0, false, null, false)).get(2));
     }
+
+    @Test
+    void pokemonFoundGetALineOfTheirOwnBeforeTheTip() {
+        Facts found = new Facts(Way.GATEKEEPER, 2, "Agitated", 300, 6, true, 12, 0, 2, 0, true, null, false, 35, false, "The Drowned Galleries", 1, 0,
+                List.of("Dratini (Pseudo-legendary, kept)", "Psyduck (Standard, lost)"));
+        List<String> lines = Recap.lines("X", found);
+        assertEquals(6, lines.size());
+        assertEquals("Pokémon found: Dratini (Pseudo-legendary, kept), Psyduck (Standard, lost).", lines.get(4));
+        assertTrue(lines.get(5).startsWith("Tip: "));
+        assertEquals(5, Recap.lines("X", facts(Way.TOLL, 1, 2, true, 1, 1, 0, 0, false, null, false)).size(), "no finds, no line");
+    }
 }

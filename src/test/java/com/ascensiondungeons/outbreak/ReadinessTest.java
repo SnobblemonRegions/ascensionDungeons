@@ -77,4 +77,15 @@ class ReadinessTest {
         assertNull(Readiness.gentlest(List.of()));
         assertEquals("Water", WATER.typeName());
     }
+
+    @Test
+    void aFirstDiveOnHardOrNightmareIsWorthAWordButNormalIsNot() {
+        Verdict hard = Readiness.assess(NORMAL, team(25), true, NORMAL, Tactics.Difficulty.HARD);
+        assertEquals(List.of(Concern.HARD_FIRST_DIVE), hard.concerns());
+        assertTrue(hard.lines().get(0).contains("on Hard"));
+        assertTrue(Readiness.assess(NORMAL, team(25), true, NORMAL, Tactics.Difficulty.NORMAL).ready());
+        assertTrue(Readiness.assess(NORMAL, team(25), true, NORMAL, Tactics.Difficulty.CASUAL).ready());
+        assertTrue(Readiness.assess(NORMAL, team(25), false, NORMAL, Tactics.Difficulty.NIGHTMARE).ready(), "a graduate picks freely");
+        assertEquals(List.of(Concern.HIGH_TIER_FIRST_DIVE, Concern.HARD_FIRST_DIVE), Readiness.assess(WATER, team(40), true, NORMAL, Tactics.Difficulty.NIGHTMARE).concerns());
+    }
 }

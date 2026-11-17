@@ -82,6 +82,12 @@ public final class AuthoredDirector implements ArenaDirector {
         });
     }
 
+    /** Lootr is filling a dive chest for a player: the dive may add a Pokémon capsule. */
+    public java.util.List<net.minecraft.world.item.ItemStack> extraLoot(UUID run, net.minecraft.server.level.ServerPlayer player, net.minecraft.core.BlockPos chest) {
+        Session s = sessionFor(player.level());
+        return s == null || s.dive() == null ? java.util.List.of() : s.dive().findsFor(player, chest);
+    }
+
     /** Operator/test aid: sends the player's first Pokemon out. */
     public String testSendOut(net.minecraft.server.level.ServerPlayer player) {
         return combat == null ? "Real-time combat is off." : combat.sendOut(player);
@@ -189,7 +195,7 @@ public final class AuthoredDirector implements ArenaDirector {
 
     /** One run's mutable mechanics state. */
     public final class Session implements OutbreakDive.Host {
-        @Override public String difficulty() { return cfg.diveDifficulty; }
+        @Override public String difficulty() { String chosen = run().difficulty(); return chosen != null ? chosen : cfg.diveDifficulty; }
 
         static final int COMPLETE_DELAY_DEFAULT = 45;
         /** The Outbreak dive for this run, or null when the dungeon is an ordinary one. */

@@ -62,6 +62,13 @@ public final class RunManager {
     /** A district run. */
     public StartResult request(Set<UUID> party) { return request(party, null); }
 
+    /** A run of the given dungeon type at a difficulty the party's leader chose ({@code null} for the server's default). */
+    public StartResult request(Set<UUID> party, String dungeonType, String difficulty) {
+        StartResult r = request(party, dungeonType);
+        if (r.ok() && r.run() != null) r.run().difficulty(difficulty);
+        return r;
+    }
+
     /** A run of the given dungeon type ({@code null} for a district run). */
     public StartResult request(Set<UUID> party, String dungeonType) {
         if (party == null || party.isEmpty()) return StartResult.refused("A dungeon needs at least one player.");
