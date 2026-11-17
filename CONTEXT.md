@@ -65,7 +65,7 @@ _Avoid_: basement, lower level, procedural wing.
 **Stairway**: The stairs from the tunnel down to the Depths' doorway. Players and enemies walk it; nothing teleports.
 _Avoid_: using it for the teleporting pads of **detached Depths**, the fallback when a dungeon has no safe wall to cut.
 
-**Knock-out**: What a lethal hit does in a dive: the player is healed, loses their unbanked haul and is sent home. Nobody dies in a dive.
+**Knock-out**: What a lethal hit does in a dive: the player is healed, loses their unbanked haul and is sent home. Nobody dies in a dive. A player's first is a **softer knock-out**.
 _Avoid_: death, wipe.
 
 **Run mark**: The custom-data tag (`ascension_run`) on an item looted in a dive that has not been banked. A failed exit removes marked items.
@@ -101,7 +101,10 @@ _Avoid_: quest, objective, mission.
 _Avoid_: veteran in code (it says nothing about how).
 
 **Free first extraction**: A player's first extraction with unbanked loot costs nothing. One per player, never given back.
-_Avoid_: grace, mercy, free dive (a knock-out in a first dive is not softened).
+_Avoid_: grace, mercy, free dive.
+
+**Softer knock-out**: A player's first knock-out that would cost them something: they keep half of what was unbanked. One per player, never given back.
+_Avoid_: mercy, second chance, forgiven knock-out (half is still lost).
 
 **Dive guide**: The window `/dungeon guide` opens: every lesson as an item to read.
 

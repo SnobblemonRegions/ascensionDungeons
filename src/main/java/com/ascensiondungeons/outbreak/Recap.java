@@ -41,9 +41,10 @@ public final class Recap {
      * @param knockedOutBy  what landed the last hit, or null
      * @param bySpell       whether that was a spell
      * @param tollPercent   the toll, for the tips that name it
+     * @param softened      a knock-out that was the player's first, so they kept part of what was unbanked
      */
     public record Facts(Way way, int stage, String stageName, long seconds, int chests, boolean reachedDepths, int itemsKept, int itemsLost, int winsKept, int winsLost,
-                        boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent) {}
+                        boolean everBanked, String knockedOutBy, boolean bySpell, int tollPercent, boolean softened) {}
 
     /** The recap, line by line: a heading, how it ended, the Outbreak, the tally, and a tip. */
     public static List<String> lines(String dungeon, Facts f) {
@@ -63,7 +64,8 @@ public final class Recap {
             case TOLL -> "You extracted by paying the toll.";
             case GATEKEEPER -> "You extracted past the gatekeeper and kept everything.";
             case EMPTY_HANDED -> "You left through the portal with nothing unbanked.";
-            case KNOCKED_OUT -> "You were knocked out" + (f.knockedOutBy() == null ? "." : " by " + f.knockedOutBy() + ".");
+            case KNOCKED_OUT -> "You were knocked out" + (f.knockedOutBy() == null ? "." : " by " + f.knockedOutBy() + ".")
+                    + (f.softened() ? " It was your first, so you kept half of what was unbanked." : "");
             case TIMED_OUT -> "Time ran out while you were still inside.";
             case LEFT -> "You left without extracting.";
             case CLEARED -> "The dungeon's boss fell and you left with everything.";
@@ -74,6 +76,8 @@ public final class Recap {
     public static String tip(Facts f) {
         switch (f.way()) {
             case KNOCKED_OUT -> {
+                if (f.softened()) return (f.bySpell() ? "That was a spell: step out of the ring on the ground. " : "")
+                        + "Next time a knock-out takes everything unbanked. Reach a checkpoint or the portal before you push on.";
                 if (f.bySpell()) return "That was a spell. The ring on the ground shows where it lands: step out of it, or knock out the caster first.";
                 if (f.itemsLost() > 0 && !f.everBanked()) return "Nothing was banked, so the knock-out took it all. A checkpoint or the portal makes loot yours: get to one before you push on.";
                 if (f.stage() >= 3) return "You were still inside at stage " + f.stage() + ". The Outbreak only grows: leaving a stage earlier keeps what you carry.";

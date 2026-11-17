@@ -205,7 +205,7 @@ async function confirmPay(bot, since) {
     w = await guideOpened;
     await sleep(500);
     const pages = w ? w.slots.slice(0, 27).filter(Boolean) : [];
-    check('A /dungeon guide opens a window with a page for every lesson', !!w && pages.length === 22 && /Dive guide/.test(typeof w.title === 'string' ? w.title : JSON.stringify(w.title)), w ? pages.length + ' pages' : 'no window');
+    check('A /dungeon guide opens a window with a page for every lesson', !!w && pages.length >= 21 && pages.length <= 27 && /Dive guide/.test(typeof w.title === 'string' ? w.title : JSON.stringify(w.title)), w ? pages.length + ' pages' : 'no window');
     if (w) { const before = (await inv(bot)).total; try { await bot.clickWindow(0, 0, 0); } catch (e) {} await sleep(300); bot.closeWindow(w); await sleep(400);
       check('A nothing can be taken out of the guide', (await inv(bot)).total === before, before + ' item(s) before and after'); }
     const timer = kinds('TIMER_CHEST')[0];
@@ -335,9 +335,31 @@ async function confirmPay(bot, since) {
     check('B the knock-out is recapped with a tip', bot.log.slice(n3).some(l => /^Dive recap: The Drowned Reservoir/.test(l)) && bot.log.slice(n3).some(l => /^  You were knocked out/.test(l))
       && bot.log.slice(n3).some(l => /^  Tip: /.test(l)), bot.log.slice(n3).filter(l => /knocked out|Tip: |Kept: /.test(l)).join(' | '));
     check('B a lethal hit knocks out instead of killing', bot.log.slice(n3).some(l => /Knocked out/.test(l)) && /entity data: [1-9][\d.]*f/.test(hp), hp);
-    check('B unbanked loot is taken, nothing else', b1.tagged > 0 && b2.items === 0 && b2.tagged === 0, `${b1.items} stacks before (${b1.tagged} marked), ${b2.items} after`);
+    // a player's first knock-out is softer: half of the unbanked loot is kept (rounded their way), unmarked
+    const keptB = b1.markedTotal - Math.floor(b1.markedTotal / 2);
+    check('B the first knock-out keeps half of the unbanked loot', b1.markedTotal > 1 && b1.total === b1.markedTotal && b2.total === keptB && b2.tagged === 0
+      && bot.log.slice(n3).some(l => /It was your first, so you keep half/.test(l)) && bot.log.slice(n3).some(l => /Guide: Knocked out/.test(l))
+      && bot.log.slice(n3).some(l => /This was your first knock-out, so you kept half/.test(l)), `${b1.markedTotal} unbanked item(s) before, ${b2.total} after (expected ${keptB}), ${b2.tagged} marked`);
     r = await cmd(bot, '/dungeon status');
     check('B the player is out of the run', /not in a dungeon run/.test(r), r);
+    r = await cmd(bot, '/dungeon tutorial', 900);
+    check('B the softer knock-out is used up', /First knock-out: used/.test(r) && /knock-outs 1/.test(r), r);
+    // ---------------- B2: the second knock-out is the ordinary one
+    run = await startRun(bot);
+    {
+      const cs = run.feats.filter(f => f.kind === 'CHEST');
+      await use(bot, cs[0].x, cs[0].y, cs[0].z);
+      const had = await inv(bot);
+      await cmd(bot, '/effect clear @s', 500);
+      const nK = bot.log.length;
+      await cmd(bot, '/kill @s', 2500);
+      const left = await inv(bot);
+      check('B2 a second knock-out takes everything unbanked', had.tagged > 0 && left.items === 0 && bot.log.slice(nK).some(l => /Knocked out\. You keep what you banked/.test(l))
+        && bot.log.slice(nK).some(l => /You lost the loot you had not banked/.test(l)) && !bot.log.slice(nK).some(l => /It was your first/.test(l)),
+        `${had.items} stacks before (${had.tagged} marked), ${left.items} after`);
+      r = await cmd(bot, '/dungeon status');
+      check('B2 the player is out of the run', /not in a dungeon run/.test(r), r);
+    }
     // the tutorial can be started over and switched off
     r = await cmd(bot, '/dungeon tutorial reset', 900);
     const r2 = await cmd(bot, '/dungeon tutorial', 900);

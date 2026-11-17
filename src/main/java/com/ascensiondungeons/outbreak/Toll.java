@@ -22,7 +22,21 @@ public final class Toll {
      * @param unbankedWins  wins earned and not banked
      * @param percent       the toll, 0..100
      */
-    public static Plan plan(int[] kindCounts, int unbankedWins, int percent, long seed) {
+    public static Plan plan(int[] kindCounts, int unbankedWins, int percent, long seed) { return plan(kindCounts, unbankedWins, percent, seed, false); }
+
+    /**
+     * What a softened knock-out takes: the player keeps {@code keepPercent} of their unbanked loot and wins and loses the rest.
+     * Split by kind the same way as the toll, but every rounding goes the player's way: one item is kept, not lost.
+     *
+     * @param keepPercent the share kept, 0..100
+     */
+    public static Plan softened(int[] kindCounts, int unbankedWins, int keepPercent, long seed) {
+        if (keepPercent < 0 || keepPercent > 100) throw new IllegalArgumentException("percent must be 0..100");
+        return plan(kindCounts, unbankedWins, 100 - keepPercent, seed, true);
+    }
+
+    /** @param lenient round what is lost down, and take nothing when the share is less than one item or one win */
+    private static Plan plan(int[] kindCounts, int unbankedWins, int percent, long seed, boolean lenient) {
         if (percent < 0 || percent > 100) throw new IllegalArgumentException("percent must be 0..100");
         int total = 0;
         for (int c : kindCounts) {
@@ -30,7 +44,7 @@ public final class Toll {
             total += c;
         }
         int[] lost = new int[kindCounts.length];
-        int owed = total == 0 || percent == 0 ? 0 : Math.max(1, (int) Math.round(total * percent / 100.0));
+        int owed = total == 0 || percent == 0 ? 0 : lenient ? (int) Math.floor(total * percent / 100.0) : Math.max(1, (int) Math.round(total * percent / 100.0));
         int taken = 0;
         double[] remainder = new double[kindCounts.length];
         for (int i = 0; i < kindCounts.length; i++) {
@@ -50,7 +64,7 @@ public final class Toll {
                 if (lost[i] < kindCounts[i]) { lost[i]++; taken++; }
             }
         }
-        return new Plan(lost, taken, winsLost(unbankedWins, percent));
+        return new Plan(lost, taken, lenient ? Math.max(0, (int) Math.floor(unbankedWins * percent / 100.0)) : winsLost(unbankedWins, percent));
     }
 
     /** Wins lost to the toll: the share, rounded to the nearest win. One unbanked win at 35 percent loses nothing. */

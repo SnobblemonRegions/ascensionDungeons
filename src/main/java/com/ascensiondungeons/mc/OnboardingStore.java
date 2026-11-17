@@ -42,7 +42,7 @@ public final class OnboardingStore extends SavedData {
             try { id = UUID.fromString(key); } catch (IllegalArgumentException e) { continue; }
             CompoundTag p = all.getCompound(key);
             store.players.put(id, new Onboarding.Progress(p.getLong("seen"), p.getInt("dives"), p.getInt("extractions"), p.getInt("knockOuts"), p.getBoolean("off"),
-                    p.getBoolean("everExtracted")));
+                    p.getBoolean("everExtracted"), p.contains("everKnockedOut") ? p.getBoolean("everKnockedOut") : p.getInt("knockOuts") > 0));
         }
         return store;
     }
@@ -59,6 +59,7 @@ public final class OnboardingStore extends SavedData {
             one.putInt("knockOuts", p.knockOuts());
             one.putBoolean("off", p.off());
             one.putBoolean("everExtracted", p.everExtracted());
+            one.putBoolean("everKnockedOut", p.everKnockedOut());
             all.put(e.getKey().toString(), one);
         }
         tag.put("players", all);

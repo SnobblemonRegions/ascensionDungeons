@@ -188,6 +188,12 @@ public final class OutbreakDive {
     private final Set<UUID> emptyHanded = new HashSet<>();
     /** Whether a player's first extraction is free here ({@code portal.firstExtractionFree}, on unless set false). */
     private final boolean firstFree;
+    /** Whether a player's first knock-out here keeps half of what was unbanked ({@code knockOut.firstKeepsHalf}, on unless set false). */
+    private final boolean firstSofter;
+    /** The share of unbanked loot and wins a softened knock-out leaves the player, in percent. */
+    static final int SOFT_KEEP = 50;
+    /** Players whose knock-out was softened, and players who had something unbanked when they were knocked out. */
+    private final Set<UUID> softened = new HashSet<>(), knockedOutAtStake = new HashSet<>();
     /** The chests each player has taken loot from, so the Guide points at one they have not. */
     private final Map<UUID, Set<BlockPos>> looted = new HashMap<>();
     /** Players who just used the stairway and have not stepped off it yet, so they are not sent straight back. */
@@ -236,6 +242,7 @@ public final class OutbreakDive {
         this.portalRadius = Jx.d(p, "radius", 2.5);
         this.tollPercent = Math.max(0, Math.min(100, Jx.i(p, "tollPercent", 35)));
         this.firstFree = Jx.b(p, "firstExtractionFree", true);
+        this.firstSofter = Jx.b(Jx.o(cfg, "knockOut"), "firstKeepsHalf", true);
         this.baseTier = Math.max(1, Jx.i(host.layout().data().pokemon, "tier", 1));
         for (JsonElement e : Jx.a(cfg, "checkpoints")) checkpoints.add(e.getAsString());
         for (JsonElement e : Jx.a(cfg, "spells")) {
@@ -266,7 +273,7 @@ public final class OutbreakDive {
         }
         if (portalCentre == null) throw new IllegalStateException("no room for an extraction portal");
         for (Feature f : features.values()) f.deep = AuthoredLayout.inDepths(roomOf(Vec3.atBottomCenterOf(f.pos)));
-        coach = new DiveCoach(host.level(), tunnelMouth != null || descentCentre != null, tollPercent, firstFree, this::guideTarget);
+        coach = new DiveCoach(host.level(), tunnelMouth != null || descentCentre != null, tollPercent, firstFree, firstSofter, this::guideTarget);
         outbreakBar = new ServerBossEvent(Component.literal("Outbreak"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.NOTCHED_6);
     }
 
@@ -318,6 +325,8 @@ public final class OutbreakDive {
     public String portalText(UUID player) { return portalBars.containsKey(player) ? portalTexts.get(player) : null; }
     /** The toll, as a percentage of unbanked loot. */
     public int tollPercent() { return tollPercent; }
+    /** Whether a knock-out now would be this player's softer first one. */
+    public boolean firstKnockOutSoft(ServerPlayer player) { return coach.firstKnockOutSoft(player); }
     /** Whether the portal would let this player out for nothing right now (their first extraction). */
     public boolean firstExtractionFree(ServerPlayer player) { return coach.firstExtractionFree(player); }
 
@@ -638,11 +647,53 @@ public final class OutbreakDive {
         p.removeAllEffects();
         p.invulnerableTime = 60;
         if (!closed && !settled.contains(p.getUUID())) {
-            settle(p.getUUID(), Haul.Exit.DIED);
             UUID id = p.getUUID();
+            if (RunLoot.countItems(p, runId()) > 0 || haul.unbankedWins(id) > 0) {
+                knockedOutAtStake.add(id);
+                if (coach.firstKnockOutSoft(p)) soften(p);
+            }
+            settle(id, Haul.Exit.DIED);
             host.later(1, () -> host.leave(id));
         }
         return false;
+    }
+
+    /**
+     * A player's first knock-out is softer: they keep half of the loot and wins they had not banked, split by kind the way the
+     * toll splits it and rounded in their favour. What they keep is banked here, so the settlement that follows leaves it alone.
+     * Loot tucked away (bundles, boxes, the ender chest, a Pokémon) is lost in full, as with the toll: hiding never pays.
+     */
+    private void soften(ServerPlayer p) {
+        UUID id = p.getUUID();
+        Offer o = offerFor(p, true);
+        take(p, o.kinds(), o.plan().lostPerKind());
+        int before = RunLoot.countItems(p, runId());
+        RunLoot.stripHidden(p, runId());
+        int kept = RunLoot.countItems(p, runId());
+        int wins = haul.forfeitWins(id, o.plan().winsLost());
+        haul.bank(id);
+        RunLoot.clearAll(p, runId());
+        bankedItems.merge(id, kept, Integer::sum);
+        tollItems.merge(id, o.plan().itemsLost() + (before - kept), Integer::sum);
+        tollWins.merge(id, wins, Integer::sum);
+        softened.add(id);
+        AscensionDungeonsLog.LOG.info("[dive] run {} first knock-out of {} is softened: kept {} item(s), lost {} and {} hidden, {} of {} unbanked win(s) lost at stage {}", runId(),
+                p.getGameProfile().getName(), kept, o.plan().itemsLost(), before - kept, wins, o.unbankedWins(), stage());
+    }
+
+    /** Takes this many items of each kind of this run's loot from the player's inventory. */
+    private void take(ServerPlayer p, List<net.minecraft.world.item.ItemStack> kinds, int[] lostPerKind) {
+        var inv = p.getInventory();
+        for (int k = 0; k < kinds.size(); k++) {
+            int owed = lostPerKind[k];
+            for (int i = 0; i < inv.getContainerSize() && owed > 0; i++) {
+                var s = inv.getItem(i);
+                if (!ours(s) || !net.minecraft.world.item.ItemStack.isSameItemSameComponents(kinds.get(k), s)) continue;
+                int n = Math.min(owed, s.getCount());
+                s.shrink(n);
+                owed -= n;
+            }
+        }
     }
 
     /** Pays one player for the way they left, exactly once, and banks or takes back the loot they carry. */
@@ -660,7 +711,9 @@ public final class OutbreakDive {
             stacks = kept ? RunLoot.clearAll(online, runId()) : RunLoot.stripAll(online, runId());
             String text = switch (exit) {
                 case EXTRACTED -> "Extracted! You leave with: " + describe(s) + ".";
-                case DIED -> "Knocked out. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
+                case DIED -> softened.contains(player)
+                        ? "Knocked out. It was your first, so you keep half of what you had not banked, as well as what you banked (" + describe(s) + ")."
+                        : "Knocked out. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
                 case TIMED_OUT -> "Time ran out. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
                 case LEFT -> "You left without extracting. You keep what you banked (" + describe(s) + "); the rest of your haul is lost.";
             };
@@ -670,7 +723,7 @@ public final class OutbreakDive {
                     if (emptyHanded.contains(player)) coach.leave(online);
                     else coach.extracted(online, graced.contains(player) ? Onboarding.Exit.FREE : tolled.contains(player) ? Onboarding.Exit.TOLL : Onboarding.Exit.GATEKEEPER, now);
                 }
-                case DIED -> coach.knockedOut(online, now);
+                case DIED -> coach.knockedOut(online, softened.contains(player), knockedOutAtStake.contains(player), now);
                 default -> coach.leave(online);
             }
             Recap.Way way = switch (exit) {
@@ -684,7 +737,7 @@ public final class OutbreakDive {
             recap(online, new Recap.Facts(way, stage, STAGE_NAMES[Math.min(stage, STAGE_NAMES.length - 1)], Math.max(0, now - startedAt) / 20,
                     looted.getOrDefault(player, Set.of()).size(), everBelow.contains(player), bankedItems.getOrDefault(player, 0) + (kept ? carried : 0),
                     tollItems.getOrDefault(player, 0) + (kept ? 0 : carried), s.arenaWins(), tollWins.getOrDefault(player, 0) + (kept ? 0 : unbankedWins),
-                    everBanked.contains(player), knockedOutBy.get(player), knockedOutBySpell.contains(player), tollPercent));
+                    everBanked.contains(player), knockedOutBy.get(player), knockedOutBySpell.contains(player), tollPercent, softened.contains(player)));
         }
         AscensionDungeonsLog.LOG.info("[dive] run {} settled {} exit={} arenaWins={} boss={} chests={} tier={} loot {} {} stack(s){}", runId(), player, exit,
                 s.arenaWins(), s.bossDefeated(), s.chests(), tier, kept ? "kept" : "stripped", stacks, online == null ? " (offline: swept on next login)" : "");
@@ -888,7 +941,10 @@ public final class OutbreakDive {
 
     private boolean ours(net.minecraft.world.item.ItemStack s) { return !s.isEmpty() && runId().equals(RunLoot.runOf(s)); }
 
-    private Offer offerFor(ServerPlayer p) {
+    private Offer offerFor(ServerPlayer p) { return offerFor(p, false); }
+
+    /** @param softKnockOut plan what a softened knock-out takes (half, rounded the player's way) instead of what the toll takes */
+    private Offer offerFor(ServerPlayer p, boolean softKnockOut) {
         List<net.minecraft.world.item.ItemStack> kinds = new ArrayList<>();
         List<Integer> counts = new ArrayList<>();
         var inv = p.getInventory();
@@ -903,7 +959,8 @@ public final class OutbreakDive {
         for (int i = 0; i < c.length; i++) c[i] = counts.get(i);
         int wins = haul.unbankedWins(p.getUUID());
         // Seeded by run and player, so the same loot always shows, and costs, the same items.
-        Toll.Plan plan = Toll.plan(c, wins, tollPercent, host.run().seed() ^ p.getUUID().getLeastSignificantBits());
+        long seed = host.run().seed() ^ p.getUUID().getLeastSignificantBits();
+        Toll.Plan plan = softKnockOut ? Toll.softened(c, wins, SOFT_KEEP, seed) : Toll.plan(c, wins, tollPercent, seed);
         return new Offer(kinds, c, plan, RunLoot.countHidden(p, runId()), wins);
     }
 
@@ -948,7 +1005,7 @@ public final class OutbreakDive {
                 : button(net.minecraft.world.item.Items.NETHERITE_SWORD, "Challenge the gatekeeper", ChatFormatting.GOLD,
                         "Outbreak stage " + stage + " (" + stageName + "): the higher the stage, the stronger it is.",
                         "Beat it and everyone leaves with everything.",
-                        "Be knocked out and you lose all your unbanked loot."));
+                        coach.firstKnockOutSoft(p) ? "Be knocked out and, this first time, you keep half of your unbanked loot." : "Be knocked out and you lose all your unbanked loot."));
         box.setItem(TollMenu.STAY, button(net.minecraft.world.item.Items.BARRIER, "Keep exploring", ChatFormatting.WHITE, "Step off the portal and back on to see this again."));
         String fingerprint = o.fingerprint();
         p.openMenu(new net.minecraft.world.SimpleMenuProvider((id, inv, player) -> new TollMenu(id, inv, box, choice -> host.later(1, () -> chosen(p, choice, fingerprint))),
@@ -988,17 +1045,7 @@ public final class OutbreakDive {
             extract(p);
             return;
         }
-        var inv = p.getInventory();
-        for (int k = 0; k < o.kinds().size(); k++) {
-            int owed = o.plan().lostPerKind()[k];
-            for (int i = 0; i < inv.getContainerSize() && owed > 0; i++) {
-                var s = inv.getItem(i);
-                if (!ours(s) || !net.minecraft.world.item.ItemStack.isSameItemSameComponents(o.kinds().get(k), s)) continue;
-                int take = Math.min(owed, s.getCount());
-                s.shrink(take);
-                owed -= take;
-            }
-        }
+        take(p, o.kinds(), o.plan().lostPerKind());
         int hiddenItems = RunLoot.countItems(p, runId());           // after the shown items went: what is left before the hidden loot goes too
         int hidden = RunLoot.stripHidden(p, runId());
         hiddenItems -= RunLoot.countItems(p, runId());

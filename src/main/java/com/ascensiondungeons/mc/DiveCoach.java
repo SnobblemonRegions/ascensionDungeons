@@ -32,15 +32,19 @@ final class DiveCoach {
     private final OnboardingStore store;
     private final boolean hasDepths;
     private final int tollPercent;
-    private final boolean firstFree;
+    private final boolean firstFree, firstSofter;
     private final Targets targets;
     private final Map<UUID, Onboarding.Coach> coaches = new HashMap<>();
     private final Map<UUID, ServerBossEvent> bars = new HashMap<>();
     private final Map<UUID, String> shown = new HashMap<>();
 
-    /** @param firstFree whether this dungeon gives a player their first extraction free */
-    DiveCoach(ServerLevel level, boolean hasDepths, int tollPercent, boolean firstFree, Targets targets) {
+    /**
+     * @param firstFree   whether this dungeon gives a player their first extraction free
+     * @param firstSofter whether a player's first knock-out here keeps half of what was unbanked
+     */
+    DiveCoach(ServerLevel level, boolean hasDepths, int tollPercent, boolean firstFree, boolean firstSofter, Targets targets) {
         this.firstFree = firstFree;
+        this.firstSofter = firstSofter;
         this.level = level;
         this.store = OnboardingStore.of(level.getServer());
         this.hasDepths = hasDepths;
@@ -73,10 +77,18 @@ final class DiveCoach {
         leave(p);
     }
 
-    void knockedOut(ServerPlayer p, long now) {
+    /** Whether a knock-out now would be this player's softer first one, where the dungeon allows it. */
+    boolean firstKnockOutSoft(ServerPlayer p) { return firstSofter && store.progress(p.getUUID()).firstKnockOutSoft(); }
+
+    /**
+     * @param softened this was their first knock-out and they kept half
+     * @param atStake  they had something unbanked to lose (a knock-out that costs nothing does not use up the softer one)
+     */
+    void knockedOut(ServerPlayer p, boolean softened, boolean atStake, long now) {
         Onboarding.Coach c = coach(p.getUUID());
-        c.knockedOut();
-        tell(p, c.tellNow(Onboarding.Lesson.KNOCKED_OUT, now));
+        c.knockedOut(atStake);
+        tell(p, c.tellNow(softened ? Onboarding.Lesson.FIRST_KNOCK_OUT : Onboarding.Lesson.KNOCKED_OUT, now));
+        store.setDirty();
         leave(p);
     }
 
@@ -130,7 +142,7 @@ final class DiveCoach {
         if (lesson == null) return;
         p.sendSystemMessage(Component.literal("Guide: ").withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD)
                 .append(Component.literal(lesson.title()).withStyle(st -> st.withColor(ChatFormatting.YELLOW).withBold(false))));
-        for (String line : lesson.lines(tollPercent, firstExtractionFree(p))) p.sendSystemMessage(Component.literal("  " + line).withStyle(ChatFormatting.GRAY));
+        for (String line : lesson.lines(tollPercent, firstExtractionFree(p), firstKnockOutSoft(p))) p.sendSystemMessage(Component.literal("  " + line).withStyle(ChatFormatting.GRAY));
         if (lesson.weight() == Onboarding.Weight.HEADLINE) {
             p.connection.send(new ClientboundSetTitlesAnimationPacket(10, 70, 20));
             p.connection.send(new ClientboundSetSubtitleTextPacket(Component.literal(lesson.subtitle()).withStyle(ChatFormatting.GRAY)));

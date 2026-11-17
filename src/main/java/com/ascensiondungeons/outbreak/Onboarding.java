@@ -92,10 +92,16 @@ public final class Onboarding {
         FIRST_EXTRACTION(Weight.HEADLINE, true, "Extracted",
                 "Your first extraction was free: this once, the toll took nothing.",
                 "From now on, leaving costs {toll}% of your unbanked loot unless you beat the gatekeeper. Leave before it outgrows you.",
-                "That is the whole loop: loot, go deeper, bank, get out. /dungeon guide keeps these notes.");
+                "That is the whole loop: loot, go deeper, bank, get out. /dungeon guide keeps these notes."),
+        FIRST_KNOCK_OUT(Weight.HEADLINE, true, "Knocked out",
+                "This was your first knock-out, so you kept half of what you had not banked. From now on a knock-out takes all of it.",
+                "What you banked, and everything you brought with you, is always safe.",
+                "Next time, bank at checkpoints and leave through the portal before the Outbreak outgrows you.");
 
         /** Added to the portal's lesson for a player whose first extraction is still to come. */
         public static final String FIRST_IS_FREE = "Your first extraction is free: this once, the toll takes nothing.";
+        /** Added to the low-health lesson for a player whose first knock-out is still to come. */
+        public static final String FIRST_IS_SOFTER = "Your first knock-out is softer: this once, you would keep half of it.";
 
         private final Weight weight;
         private final boolean urgent;
@@ -123,17 +129,24 @@ public final class Onboarding {
                 case TOLL_PAID -> "You paid the toll and kept the rest";
                 case EXTRACTED -> "You kept everything";
                 case FIRST_EXTRACTION -> "Your first extraction is free";
+                case FIRST_KNOCK_OUT -> "You kept half, this once";
                 default -> "";
             };
         }
 
-        public List<String> lines(int tollPercent) { return lines(tollPercent, false); }
+        public List<String> lines(int tollPercent) { return lines(tollPercent, false, false); }
 
-        /** @param firstFree the player's first extraction is free and still to come: the portal's lesson says so */
-        public List<String> lines(int tollPercent, boolean firstFree) {
+        public List<String> lines(int tollPercent, boolean firstFree) { return lines(tollPercent, firstFree, false); }
+
+        /**
+         * @param firstFree   the player's first extraction is free and still to come: the portal's lesson says so
+         * @param firstSofter the player's first knock-out is softer and still to come: the low-health lesson says so
+         */
+        public List<String> lines(int tollPercent, boolean firstFree, boolean firstSofter) {
             List<String> out = new ArrayList<>(lines.size() + 1);
             for (String line : lines) out.add(line.replace("{toll}", Integer.toString(tollPercent)));
             if (firstFree && this == PORTAL) out.add(FIRST_IS_FREE);
+            if (firstSofter && this == LOW_HEALTH) out.add(FIRST_IS_SOFTER);
             return out;
         }
 
@@ -172,20 +185,38 @@ public final class Onboarding {
         private boolean off;
         /** The player has left through the portal at some time. Starting the tutorial over does not forget this. */
         private boolean everExtracted;
+        /** The player has been knocked out with something unbanked to lose. Not forgotten by starting over either. */
+        private boolean everKnockedOut;
 
         public Progress() {}
 
         /** For progress saved before the free first extraction existed: anyone who had extracted has had theirs. */
         public Progress(long seen, int dives, int extractions, int knockOuts, boolean off) { this(seen, dives, extractions, knockOuts, off, extractions > 0); }
 
+        /** For progress saved before the softer first knock-out existed: anyone who had been knocked out has had theirs. */
         public Progress(long seen, int dives, int extractions, int knockOuts, boolean off, boolean everExtracted) {
+            this(seen, dives, extractions, knockOuts, off, everExtracted, knockOuts > 0);
+        }
+
+        public Progress(long seen, int dives, int extractions, int knockOuts, boolean off, boolean everExtracted, boolean everKnockedOut) {
             this.seen = seen;
             this.dives = dives;
             this.extractions = extractions;
             this.knockOuts = knockOuts;
             this.off = off;
             this.everExtracted = everExtracted || extractions > 0;
+            this.everKnockedOut = everKnockedOut;
         }
+
+        /** The player has been knocked out with something to lose at some time. Starting the tutorial over does not forget this. */
+        public boolean everKnockedOut() { return everKnockedOut; }
+        /**
+         * A player's first knock-out is softer: they keep part of what they had not banked. It is theirs until a knock-out
+         * costs them something, whether or not they want coaching, and starting the tutorial over does not give it back.
+         */
+        public boolean firstKnockOutSoft() { return !everKnockedOut; }
+        /** Operator aid: this player has had their softer knock-out. */
+        public void forfeitFirstKnockOut() { everKnockedOut = true; }
 
         public boolean everExtracted() { return everExtracted; }
         /**
@@ -216,7 +247,7 @@ public final class Onboarding {
         void markSeen(Lesson lesson) { seen |= lesson.bit(); }
         void startedDive() { dives++; }
         void extracted() { extractions++; everExtracted = true; }
-        void knockedOut() { knockOuts++; }
+        void knockedOut(boolean atStake) { knockOuts++; if (atStake) everKnockedOut = true; }
     }
 
     /** Pacing, in ticks. */
@@ -311,7 +342,10 @@ public final class Onboarding {
         /** The player left through the portal: free the first time, by the toll, or past the gatekeeper. They graduate. */
         public void extracted() { progress.extracted(); goal = null; changed = true; }
 
-        public void knockedOut() { progress.knockedOut(); changed = true; }
+        public void knockedOut() { knockedOut(true); }
+
+        /** @param atStake whether the player had anything unbanked to lose; a knock-out that costs nothing does not use up the softer first one */
+        public void knockedOut(boolean atStake) { progress.knockedOut(atStake); changed = true; }
 
         /** True once after anything worth saving changed. */
         public boolean pollChanged() { boolean c = changed; changed = false; return c; }

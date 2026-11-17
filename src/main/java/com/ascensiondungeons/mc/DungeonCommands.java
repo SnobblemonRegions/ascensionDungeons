@@ -96,6 +96,7 @@ public final class DungeonCommands {
                     reply(ctx, "Dive tutorial: " + (progress.off() ? "off" : progress.graduated() ? "finished (you still get a tip the first time you meet something new)" : "on")
                             + ". Dives " + progress.dives() + ", extractions " + progress.extractions() + ", knock-outs " + progress.knockOuts()
                             + ". First extraction: " + (progress.firstExtractionFree() ? "free, still to come" : "used")
+                            + ". First knock-out: " + (progress.firstKnockOutSoft() ? "softer, still to come" : "used")
                             + ". Use /dungeon tutorial on, off or reset; /dungeon guide opens the notes.");
                     return 1;
                 }).then(Commands.literal("off").executes(ctx -> tutorial(ctx, "off")))
@@ -266,7 +267,8 @@ public final class DungeonCommands {
             case "off" -> { progress.setOff(true); reply(ctx, "Dive tutorial off: no Guide bar and no tips. /dungeon tutorial on brings it back."); }
             case "on" -> { progress.setOff(false); reply(ctx, "Dive tutorial on."); }
             default -> { progress.reset(); reply(ctx, "Dive tutorial started over: your next dive is taught from the beginning."
-                    + (progress.firstExtractionFree() ? "" : " (Your free first extraction has been used; that does not come back.)")); }
+                    + (progress.firstExtractionFree() ? "" : " (Your free first extraction has been used; that does not come back.)")
+                    + (progress.firstKnockOutSoft() ? "" : " (Your softer first knock-out has been used; that does not come back either.)")); }
         }
         store.setDirty();
         return 1;

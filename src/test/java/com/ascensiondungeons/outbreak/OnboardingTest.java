@@ -190,7 +190,7 @@ class OnboardingTest {
             assertTrue(l.subtitle().length() <= 40, l.name());
             List<String> lines = l.lines(35);
             assertTrue(lines.size() >= 1 && lines.size() <= 3, l.name());
-            assertTrue(l.lines(35, true).size() <= 4, l.name());
+            assertTrue(l.lines(35, true, true).size() <= 4, l.name());
             for (String line : lines) {
                 assertFalse(line.contains("{"), l.name() + ": " + line);
                 assertTrue(line.length() <= 200, l.name());
@@ -246,10 +246,55 @@ class OnboardingTest {
     }
 
     @Test
+    void aPlayersFirstKnockOutIsSofterAndOnlyTheFirstThatCostsThem() {
+        Progress p = new Progress();
+        assertTrue(p.firstKnockOutSoft());
+        Coach first = new Coach(p, PACE, true);
+        first.knockedOut(false);
+        assertEquals(1, p.knockOuts());
+        assertTrue(p.firstKnockOutSoft(), "a knock-out with nothing to lose does not use it up");
+        // the low-health lesson says so while it is still to come, and only that lesson
+        assertEquals(Lesson.FIRST_IS_SOFTER, Lesson.LOW_HEALTH.lines(35, false, true).get(2));
+        assertEquals(2, Lesson.LOW_HEALTH.lines(35, false, false).size());
+        assertEquals(Lesson.PORTAL.lines(35, true), Lesson.PORTAL.lines(35, true, true));
+        new Coach(p, PACE, true).knockedOut(true);
+        assertFalse(p.firstKnockOutSoft());
+        assertTrue(p.everKnockedOut());
+        assertTrue(p.rookie(), "they are still being taught");
+        assertTrue(p.firstExtractionFree(), "and their free extraction is untouched");
+        // starting over does not give it back, and it is not tied to coaching
+        p.reset();
+        assertFalse(p.firstKnockOutSoft());
+        Progress quiet = new Progress();
+        quiet.setOff(true);
+        assertTrue(quiet.firstKnockOutSoft());
+        quiet.forfeitFirstKnockOut();
+        assertFalse(quiet.firstKnockOutSoft());
+    }
+
+    @Test
+    void theSofterKnockOutSurvivesBeingStoredAndOldProgressCountsAsUsed() {
+        Progress p = new Progress();
+        new Coach(p, PACE, true).knockedOut(false);
+        Progress back = new Progress(p.seenBits(), p.dives(), p.extractions(), p.knockOuts(), p.off(), p.everExtracted(), p.everKnockedOut());
+        assertTrue(back.firstKnockOutSoft(), "knocked out once with nothing at stake: still to come after a reload");
+        assertEquals(1, back.knockOuts());
+        // progress saved before this existed: anyone who had been knocked out has had theirs
+        assertFalse(new Progress(0, 3, 0, 2, false, false).firstKnockOutSoft());
+        assertTrue(new Progress(0, 3, 1, 0, false, true).firstKnockOutSoft());
+        assertFalse(new Progress(0, 3, 0, 1, false).firstKnockOutSoft());
+        // the knock-out's own words: softened the first time, the plain lesson is still there for the next
+        Coach c = new Coach(new Progress(), PACE, true);
+        assertEquals(Lesson.FIRST_KNOCK_OUT, c.tellNow(Lesson.FIRST_KNOCK_OUT, 0));
+        assertEquals(Lesson.KNOCKED_OUT, c.tellNow(Lesson.KNOCKED_OUT, 1));
+        assertTrue(Lesson.FIRST_KNOCK_OUT.lines(35).get(0).contains("kept half"));
+    }
+
+    @Test
     void lessonsKeepTheirPlacesBecauseWhatWasHeardIsSavedByPosition() {
         // A new lesson goes at the end. If this fails, saved progress would point at the wrong lessons.
         String[] order = {"WELCOME", "OUTBREAK", "ENEMIES", "SPELLS", "CHESTS", "UNBANKED", "CHECKPOINT", "STAGE", "TUNNEL", "DEPTHS", "TIMER_CHEST", "OUTBREAK_CHEST",
-                "STRONGBOX", "ALTAR", "LOW_HEALTH", "TIME_SHORT", "PORTAL", "GATEKEEPER", "KNOCKED_OUT", "TOLL_PAID", "EXTRACTED", "FIRST_EXTRACTION"};
+                "STRONGBOX", "ALTAR", "LOW_HEALTH", "TIME_SHORT", "PORTAL", "GATEKEEPER", "KNOCKED_OUT", "TOLL_PAID", "EXTRACTED", "FIRST_EXTRACTION", "FIRST_KNOCK_OUT"};
         assertTrue(Lesson.values().length >= order.length);
         for (int i = 0; i < order.length; i++) assertEquals(order[i], Lesson.values()[i].name(), "position " + i);
     }

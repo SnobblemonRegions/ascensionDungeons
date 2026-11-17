@@ -35,15 +35,15 @@ public final class GuideMenu extends ChestMenu {
     public static void open(ServerPlayer player, Onboarding.Progress progress, int tollPercent) {
         SimpleContainer box = new SimpleContainer(27);
         int slot = 0;
-        for (Onboarding.Lesson lesson : Onboarding.Lesson.values()) box.setItem(slot++, page(lesson, progress.seen(lesson), tollPercent, progress.firstExtractionFree()));
+        for (Onboarding.Lesson lesson : Onboarding.Lesson.values()) box.setItem(slot++, page(lesson, progress.seen(lesson), tollPercent, progress.firstExtractionFree(), progress.firstKnockOutSoft()));
         player.openMenu(new SimpleMenuProvider((id, inv, p) -> new GuideMenu(id, inv, box), Component.literal("Dive guide (hover over an item)")));
     }
 
-    static ItemStack page(Onboarding.Lesson lesson, boolean met, int tollPercent, boolean firstFree) {
+    static ItemStack page(Onboarding.Lesson lesson, boolean met, int tollPercent, boolean firstFree, boolean firstSofter) {
         ItemStack stack = new ItemStack(icon(lesson));
         stack.set(DataComponents.CUSTOM_NAME, Component.literal(lesson.title()).withStyle(st -> st.withColor(ChatFormatting.GOLD).withItalic(false)));
         List<Component> lines = new ArrayList<>();
-        for (String text : lesson.lines(tollPercent, firstFree)) {
+        for (String text : lesson.lines(tollPercent, firstFree, firstSofter)) {
             for (String part : Onboarding.wrap(text, WRAP)) lines.add(Component.literal(part).withStyle(st -> st.withColor(ChatFormatting.GRAY).withItalic(false)));
             lines.add(Component.empty());
         }
@@ -78,6 +78,7 @@ public final class GuideMenu extends ChestMenu {
             case TOLL_PAID -> Items.RED_CONCRETE;
             case EXTRACTED -> Items.ENDER_PEARL;
             case FIRST_EXTRACTION -> Items.LIME_CONCRETE;
+            case FIRST_KNOCK_OUT -> Items.SHIELD;
         };
     }
 

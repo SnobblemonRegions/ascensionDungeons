@@ -91,4 +91,39 @@ class TollTest {
         assertThrows(IllegalArgumentException.class, () -> Toll.plan(new int[] {1}, 0, 101, 1));
         assertThrows(IllegalArgumentException.class, () -> Toll.plan(new int[] {-1}, 0, 35, 1));
     }
+
+    @Test
+    void aSoftenedKnockOutKeepsHalfAndRoundsThePlayersWay() {
+        // ten of one kind, four of another, keep half: lose five and two
+        Toll.Plan plan = Toll.softened(new int[] {10, 4}, 4, 50, 7);
+        assertArrayEquals(new int[] {5, 2}, plan.lostPerKind());
+        assertEquals(7, plan.itemsLost());
+        assertEquals(2, plan.winsLost());
+        // odd numbers round in the player's favour: of five items two are lost, of three wins one
+        Toll.Plan odd = Toll.softened(new int[] {5}, 3, 50, 7);
+        assertEquals(2, odd.itemsLost());
+        assertEquals(1, odd.winsLost());
+        // a single item and a single win are kept, where the toll would take the item
+        Toll.Plan one = Toll.softened(new int[] {1}, 1, 50, 7);
+        assertEquals(0, one.itemsLost());
+        assertEquals(0, one.winsLost());
+        assertEquals(1, Toll.plan(new int[] {1}, 1, 50, 7).itemsLost());
+        // many single items of different kinds: half of them go, never more
+        Toll.Plan singles = Toll.softened(new int[] {1, 1, 1, 1, 1}, 0, 50, 7);
+        assertEquals(2, singles.itemsLost());
+        for (int lost : singles.lostPerKind()) assertTrue(lost == 0 || lost == 1);
+        assertArrayEquals(singles.lostPerKind(), Toll.softened(new int[] {1, 1, 1, 1, 1}, 0, 50, 7).lostPerKind(), "the same loot and seed give the same split");
+    }
+
+    @Test
+    void theShareKeptCanBeAnythingFromNothingToAll() {
+        assertEquals(10, Toll.softened(new int[] {6, 4}, 2, 0, 1).itemsLost(), "keep nothing: an ordinary knock-out");
+        assertEquals(2, Toll.softened(new int[] {6, 4}, 2, 0, 1).winsLost());
+        assertEquals(0, Toll.softened(new int[] {6, 4}, 2, 100, 1).itemsLost(), "keep everything");
+        assertEquals(0, Toll.softened(new int[] {6, 4}, 2, 100, 1).winsLost());
+        assertEquals(2, Toll.softened(new int[] {6, 4}, 2, 75, 1).itemsLost(), "keep three quarters of ten: lose two and a half, rounded down");
+        assertEquals(0, Toll.softened(new int[0], 0, 50, 1).itemsLost());
+        assertThrows(IllegalArgumentException.class, () -> Toll.softened(new int[] {1}, 0, 101, 1));
+        assertThrows(IllegalArgumentException.class, () -> Toll.softened(new int[] {1}, 0, -1, 1));
+    }
 }

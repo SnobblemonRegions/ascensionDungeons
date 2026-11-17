@@ -9,7 +9,24 @@ import org.junit.jupiter.api.Test;
 
 class RecapTest {
     private static Facts facts(Way way, int stage, int chests, boolean depths, int kept, int lost, int winsKept, int winsLost, boolean banked, String by, boolean spell) {
-        return new Facts(way, stage, OUTBREAK[stage], 754, chests, depths, kept, lost, winsKept, winsLost, banked, by, spell, 35);
+        return new Facts(way, stage, OUTBREAK[stage], 754, chests, depths, kept, lost, winsKept, winsLost, banked, by, spell, 35, false);
+    }
+
+    private static Facts softened(String by, boolean spell) {
+        return new Facts(Way.KNOCKED_OUT, 2, OUTBREAK[2], 754, 4, true, 6, 5, 1, 1, false, by, spell, 35, true);
+    }
+
+    @Test
+    void aSoftenedKnockOutSaysSoAndWarnsAboutTheNext() {
+        List<String> lines = Recap.lines("The Drowned Reservoir", softened("Elite Golduck", false));
+        assertEquals("You were knocked out by Elite Golduck. It was your first, so you kept half of what was unbanked.", lines.get(1));
+        assertEquals("Kept: 6 items, 1 win. Lost: 5 items, 1 win.", lines.get(3));
+        assertEquals("Tip: Next time a knock-out takes everything unbanked. Reach a checkpoint or the portal before you push on.", lines.get(4));
+        assertEquals("You were knocked out. It was your first, so you kept half of what was unbanked.", Recap.ended(softened(null, false)));
+        // by a spell: the ring is still worth saying
+        assertTrue(Recap.tip(softened("Whirlpool", true)).startsWith("That was a spell: step out of the ring on the ground. Next time"));
+        // an ordinary knock-out says nothing of the kind
+        assertFalse(Recap.ended(facts(Way.KNOCKED_OUT, 2, 4, true, 0, 5, 0, 1, false, "Golduck", false)).contains("your first"));
     }
 
     private static final String[] OUTBREAK = {"Calm", "Restless", "Agitated", "Swarming", "Rampage", "Mass Outbreak"};

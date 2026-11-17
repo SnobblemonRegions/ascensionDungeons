@@ -534,12 +534,14 @@ public final class DiveE2E {
             }
         }));
         if (cobblemon) steps.add(new Step("unbanked loot is hidden on the second Pokémon", 40, () -> Party.hideSecond(bot)));
-        steps.add(new Step("a lethal hit knocks the player out alive, with only unbanked loot taken" + (cobblemon ? " (the hidden item too)" : ""), 100, new BooleanSupplier() {
-            boolean hit; int banked;
+        steps.add(new Step("the first knock-out is softer: the player is alive, keeps what was banked and half of what was not" + (cobblemon ? ", and loses the item hidden on a Pokémon" : ""), 100,
+                new BooleanSupplier() {
+            boolean hit; int unbanked, banked;
             @Override public boolean getAsBoolean() {
                 if (!hit) {
-                    int[] c = count();
-                    banked = c[0] - c[1];
+                    unbanked = markedItems();
+                    banked = totalItems() - unbanked;
+                    if (!dive().firstKnockOutSoft(bot)) throw new IllegalStateException("a first knock-out should be the softer one");
                     bot.setInvulnerable(false);
                     bot.invulnerableTime = 0;
                     bot.hurt(bot.level().damageSources().generic(), 100000f);
@@ -547,10 +549,13 @@ public final class DiveE2E {
                     return false;
                 }
                 if (bot.level() != server.overworld()) return false;
-                int[] c = count();
+                // Half is lost, rounded the player's way: of seven items three go and four stay.
+                int kept = unbanked - unbanked / 2;
                 boolean heldOk = !cobblemon || Party.afterKnockOut();
-                AscensionDungeonsLog.LOG.info("DIVE-E2E after knock-out: alive {} health {} stacks {} marked {} (banked before: {})", bot.isAlive(), bot.getHealth(), c[0], c[1], banked);
-                return bot.isAlive() && bot.getHealth() > 0 && c[1] == 0 && c[0] == banked && heldOk;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E after the first knock-out: alive {} health {}; had {} banked and {} unbanked item(s), now {} with {} marked (expected {})", bot.isAlive(),
+                        bot.getHealth(), banked, unbanked, totalItems(), markedItems(), banked + kept);
+                return bot.isAlive() && bot.getHealth() > 0 && unbanked > 1 && markedItems() == 0 && totalItems() == banked + kept && heldOk && !progress().firstKnockOutSoft()
+                        && heard("Knocked out. It was your first, so you keep half of what you had not banked");
             }
         }));
         steps.add(new Step("the knocked-out player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
@@ -559,12 +564,14 @@ public final class DiveE2E {
             boolean in = false;
             for (String line : chat) { if (line.startsWith("Dive recap:")) in = true; if (in && recap.size() < 5) recap.add(line.trim()); }
             AscensionDungeonsLog.LOG.info("DIVE-E2E recap after the knock-out: {}", recap);
-            return recap.size() == 5 && recap.get(0).equals("Dive recap: The Drowned Reservoir") && recap.get(1).startsWith("You were knocked out") && recap.get(2).matches("Outbreak: stage \\d \\(.+\\) after \\d+m \\d\\ds\\. Chests opened: \\d+\\.")
+            return recap.size() == 5 && recap.get(0).equals("Dive recap: The Drowned Reservoir") && recap.get(1).startsWith("You were knocked out")
+                    && recap.get(1).endsWith("It was your first, so you kept half of what was unbanked.") && recap.get(4).startsWith("Tip: Next time a knock-out takes everything unbanked.") && recap.get(2).matches("Outbreak: stage \\d \\(.+\\) after \\d+m \\d\\ds\\. Chests opened: \\d+\\.")
                     && recap.get(3).matches("Kept: \\d+ items?, \\d+ wins?\\. Lost: \\d+ items?, \\d+ wins?\\.") && !recap.get(3).contains("Lost: 0 items") && recap.get(4).startsWith("Tip: ");
         }));
         steps.add(new Step("the knock-out is explained on screen and in chat, and the player is still being taught", 40, () -> {
             AscensionDungeonsLog.LOG.info("DIVE-E2E after the knock-out: titles {}, knock-outs {}, graduated {}", titles, progress().knockOuts(), progress().graduated());
-            boolean ok = heard("Guide: Knocked out") && heard("everything you brought with you, is safe") && titles.contains("Knocked out") && progress().knockOuts() == 1 && progress().rookie();
+            boolean ok = heard("Guide: Knocked out") && heard("This was your first knock-out, so you kept half of what you had not banked.") && heard("everything you brought with you, is always safe")
+                    && titles.contains("Knocked out") && progress().knockOuts() == 1 && progress().rookie() && dive() == null;
             chat.clear();
             titles.clear();
             return ok;
@@ -729,6 +736,38 @@ public final class DiveE2E {
         steps.add(new Step("the extracted player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
         steps.add(new Step("the recap after beating the gatekeeper says everything was kept", 40, () ->
                 heard("You extracted past the gatekeeper and kept everything.") && heard("Lost: 0 items, 0 wins.") && heard("Tip: ")));
+        // A second knock-out is the ordinary one: everything unbanked goes.
+        addRun(manager, "run 5");
+        steps.add(new Step("run 5: loot a chest", 100, new BooleanSupplier() {
+            boolean used;
+            @Override public boolean getAsBoolean() {
+                bot.setInvulnerable(true);
+                if (!used) { chat.clear(); titles.clear(); for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY); use(freshChest()); used = true; return false; }
+                if (!takeAll()) return false;
+                return markedItems() > 0;
+            }
+        }));
+        steps.add(new Step("run 5: a second knock-out takes everything unbanked, and says so", 100, new BooleanSupplier() {
+            boolean hit; int unbanked;
+            @Override public boolean getAsBoolean() {
+                if (!hit) {
+                    unbanked = markedItems();
+                    if (dive().firstKnockOutSoft(bot)) throw new IllegalStateException("the softer knock-out was already used");
+                    bot.setInvulnerable(false);
+                    bot.invulnerableTime = 0;
+                    bot.hurt(bot.level().damageSources().generic(), 100000f);
+                    hit = true;
+                    return false;
+                }
+                if (bot.level() != server.overworld()) return false;
+                AscensionDungeonsLog.LOG.info("DIVE-E2E after the second knock-out: had {} unbanked item(s), now {} item(s); knock-outs {}", unbanked, totalItems(), progress().knockOuts());
+                // The count restarted when the tutorial was started over in run 3; that the softer one is used did not.
+                return bot.isAlive() && unbanked > 0 && totalItems() == 0 && progress().knockOuts() == 1 && progress().everKnockedOut() && heard("Knocked out. You keep what you banked")
+                        && heard("Guide: Knocked out") && heard("You lost the loot you had not banked.") && heard("You were knocked out.") && !heard("It was your first")
+                        && recapNumber("Lost: ") == unbanked;
+            }
+        }));
+        steps.add(new Step("run 5: the player is out of the run", 100, () -> manager.get().runOf(ID).isEmpty()));
         partySteps(server, manager, cobblemon);
     }
 
@@ -1038,6 +1077,13 @@ public final class DiveE2E {
     }
 
     private static int shown, itemsBefore;
+
+    /** How many items of unbanked dive loot are in the stand-in player's inventory (items, not stacks). */
+    private static int markedItems() {
+        int n = 0;
+        for (int i = 0; i < bot.getInventory().getContainerSize(); i++) { ItemStack s = bot.getInventory().getItem(i); if (RunLoot.runOf(s) != null) n += s.getCount(); }
+        return n;
+    }
 
     private static int totalItems() {
         int n = 0;
