@@ -1,0 +1,38 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "cobblemon:item/poke_balls/master_ball"
+  },
+  "overrides": [
+    {
+      "predicate": {
+        "custom_model_data": 9201
+      },
+      "model": "ascensiondungeons:item/capsule/standard"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9202
+      },
+      "model": "ascensiondungeons:item/capsule/starter"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9203
+      },
+      "model": "ascensiondungeons:item/capsule/pseudo"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9204
+      },
+      "model": "ascensiondungeons:item/capsule/legendary"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9205
+      },
+      "model": "ascensiondungeons:item/capsule/mythical"
+    }
+  ]
+}

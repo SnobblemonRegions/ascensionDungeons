@@ -146,6 +146,7 @@ public final class DungeonCommands {
                             reply(ctx, "Your next dive chest holds a " + tier.label() + " Pokémon, if this dungeon has one of that tier (else none). Open a dive chest you have not opened yet.");
                             return 1;
                         }))))
+                .then(capsuleNode())
                 .then(Commands.literal("chest").requires(s -> s.hasPermission(2)).executes(ctx -> {
                     ServerPlayer p = ctx.getSource().getPlayerOrException();
                     var id = net.minecraft.resources.ResourceLocation.parse("lootr:lootr_chest");
@@ -188,6 +189,52 @@ public final class DungeonCommands {
                             reply(ctx, ok ? "Retrying cleanup." : "No such run in CLEANUP_FAILED.");
                             return ok ? 1 : 0;
                         }))));
+    }
+
+    /**
+     * Operator aid: {@code /dungeon capsule give <species> [tier] [difficulty]} hands over a sealed capsule, at risk as if just
+     * found in a dive; {@code /dungeon capsule bank} banks every test capsule you carry, so it clears and shows the Pokémon. Test
+     * capsules are real ones: their finder can release them once banked, and like any dive loot they are lost at the next login
+     * if still at risk.
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack> capsuleNode() {
+        var tiers = (com.mojang.brigadier.suggestion.SuggestionProvider<CommandSourceStack>) (ctx, b) -> net.minecraft.commands.SharedSuggestionProvider.suggest(
+                java.util.Arrays.stream(com.ascensiondungeons.outbreak.PokemonFinds.Tier.values()).map(t -> t.name().toLowerCase(java.util.Locale.ROOT)), b);
+        var difficulties = (com.mojang.brigadier.suggestion.SuggestionProvider<CommandSourceStack>) (ctx, b) -> net.minecraft.commands.SharedSuggestionProvider.suggest(
+                java.util.Arrays.stream(com.ascensiondungeons.outbreak.Tactics.Difficulty.values()).map(t -> t.name().toLowerCase(java.util.Locale.ROOT)), b);
+        return Commands.literal("capsule").requires(s -> s.hasPermission(2))
+                .then(Commands.literal("give").then(Commands.argument("species", StringArgumentType.word())
+                        .executes(ctx -> giveCapsule(ctx, "standard", "normal"))
+                        .then(Commands.argument("tier", StringArgumentType.word()).suggests(tiers)
+                                .executes(ctx -> giveCapsule(ctx, StringArgumentType.getString(ctx, "tier"), "normal"))
+                                .then(Commands.argument("difficulty", StringArgumentType.word()).suggests(difficulties)
+                                        .executes(ctx -> giveCapsule(ctx, StringArgumentType.getString(ctx, "tier"), StringArgumentType.getString(ctx, "difficulty")))))))
+                .then(Commands.literal("bank").executes(ctx -> {
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    int n = RunLoot.clearAll(p, Capsules.TEST_RUN);
+                    reply(ctx, n == 0 ? "You carry no test capsules at risk." : "Banked " + n + " test capsule stack(s): they're clear now. Right-click one to release it.");
+                    return n;
+                }));
+    }
+
+    private static int giveCapsule(CommandContext<CommandSourceStack> ctx, String tierName, String difficultyName) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer p = ctx.getSource().getPlayerOrException();
+        String species = StringArgumentType.getString(ctx, "species").toLowerCase(java.util.Locale.ROOT);
+        com.ascensiondungeons.outbreak.PokemonFinds.Tier tier;
+        try { tier = com.ascensiondungeons.outbreak.PokemonFinds.Tier.valueOf(tierName.toUpperCase(java.util.Locale.ROOT)); }
+        catch (IllegalArgumentException e) { ctx.getSource().sendFailure(Component.literal("Tiers: standard, starter, pseudo, legendary, mythical.")); return 0; }
+        var difficulty = com.ascensiondungeons.outbreak.Tactics.Difficulty.parse(difficultyName, null);
+        if (difficulty == null) { ctx.getSource().sendFailure(Component.literal("Difficulties: casual, normal, hard, nightmare.")); return 0; }
+        Capsules.Releaser r = Capsules.releaser;
+        if (r != null && r.info(species) == null) { ctx.getSource().sendFailure(Component.literal("Cobblemon has no species called \"" + species + "\".")); return 0; }
+        int level = tier == com.ascensiondungeons.outbreak.PokemonFinds.Tier.STANDARD ? 20 : tier.ordinal() >= 3 ? 40 : 10;
+        var find = new com.ascensiondungeons.outbreak.PokemonFinds.Find(tier, species, level);
+        var stack = Capsules.make(find, com.ascensiondungeons.outbreak.PokemonFinds.floor(difficulty), 2, p,
+                new Capsules.Origin("Test capsule", "The Testing Halls", difficulty.label(), 2));
+        RunLoot.tag(stack, Capsules.TEST_RUN);
+        if (!p.getInventory().add(stack)) p.drop(stack, false);
+        reply(ctx, "Gave you a sealed " + tier.label() + " capsule. /dungeon capsule bank clears it; then right-click to release.");
+        return 1;
     }
 
     private int startType(CommandContext<CommandSourceStack> ctx, Set<UUID> party) {

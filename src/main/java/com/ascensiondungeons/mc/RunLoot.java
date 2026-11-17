@@ -12,6 +12,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.ItemLore;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
 import net.minecraft.world.item.component.BundleContents;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemContainerContents;
@@ -55,10 +59,38 @@ public final class RunLoot {
         return f == null || dimension == null ? null : f.apply(dimension);
     }
 
-    /** Marks the stack as loot of this run, keeping any custom data it already has. */
+    /** The two lines every looted item carries while it is at risk (capsules say it their own way). */
+    static final String WARNING = "\u26A0 Dive loot \u00b7 at risk", WARNING_HINT = "Bank it at a checkpoint or carry it out.";
+
+    /**
+     * Marks the stack as loot of this run, keeping any custom data it already has, and adds the at-risk lines to its tooltip.
+     * Every stack of a run gets the same lines, so marked loot still stacks with marked loot.
+     */
     public static void tag(ItemStack stack, UUID runId) {
         if (stack.isEmpty()) return;
         CustomData.update(DataComponents.CUSTOM_DATA, stack, tag -> tag.putString(RUN_TAG, runId.toString()));
+        if (Capsules.read(stack) != null) return;
+        ItemLore lore = stack.getOrDefault(DataComponents.LORE, ItemLore.EMPTY);
+        if (hasWarning(lore)) return;
+        List<Component> lines = new ArrayList<>(lore.lines());
+        Style plain = Style.EMPTY.withItalic(false);
+        lines.add(Component.literal(WARNING).withStyle(plain.withColor(ChatFormatting.YELLOW)));
+        lines.add(Component.literal(WARNING_HINT).withStyle(plain.withColor(ChatFormatting.GRAY)));
+        stack.set(DataComponents.LORE, new ItemLore(lines));
+    }
+
+    private static boolean hasWarning(ItemLore lore) {
+        List<Component> l = lore.lines();
+        return l.size() >= 2 && WARNING.equals(l.get(l.size() - 2).getString()) && WARNING_HINT.equals(l.get(l.size() - 1).getString());
+    }
+
+    /** Takes the at-risk lines off again, and the lore with them when nothing else was there. */
+    private static void unwarn(ItemStack stack) {
+        ItemLore lore = stack.get(DataComponents.LORE);
+        if (lore == null || !hasWarning(lore)) return;
+        List<Component> lines = lore.lines().subList(0, lore.lines().size() - 2);
+        if (lines.isEmpty()) stack.remove(DataComponents.LORE);
+        else stack.set(DataComponents.LORE, new ItemLore(new ArrayList<>(lines)));
     }
 
     /** The run this stack was looted in, or null. */
@@ -78,6 +110,7 @@ public final class RunLoot {
         if (stack.isEmpty()) return;
         CustomData data = stack.get(DataComponents.CUSTOM_DATA);
         if (data == null || !data.contains(RUN_TAG)) return;
+        unwarn(stack);
         CompoundTag tag = data.copyTag();
         tag.remove(RUN_TAG);
         if (tag.isEmpty()) stack.remove(DataComponents.CUSTOM_DATA);
@@ -214,7 +247,7 @@ public final class RunLoot {
         if (remove) return ItemStack.EMPTY;
         ItemStack copy = s.copy();
         clear(copy);
-        return copy;
+        return Capsules.cleared(copy);                          // a capsule clears: the Pokémon shows
     }
 
     /** Bundles and shulker boxes: the same rule for what is inside them. Returns how many inner stacks changed. */

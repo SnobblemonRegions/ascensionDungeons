@@ -25,6 +25,23 @@ public final class CapsuleRelease implements Capsules.Releaser {
         return pokemon.getDisplayName(false).getString();
     }
 
+    @Override
+    public Capsules.Info info(String species) {
+        var s = com.cobblemon.mod.common.api.pokemon.PokemonSpecies.INSTANCE.getByName(species);
+        if (s == null) return null;
+        java.util.List<Capsules.Type> types = new java.util.ArrayList<>();
+        for (var t : s.getTypes()) types.add(new Capsules.Type(t.getName(), t.getHue() & 0xFFFFFF));   // "Water", and its colour (RGB)
+        return new Capsules.Info(s.getName(), types);
+    }
+
+    /** Cobblemon's own item for showing a Pokémon: each player's Cobblemon draws the real model, so no art is shipped. */
+    @Override
+    public net.minecraft.world.item.ItemStack model(String species, float[] tint) {
+        var s = com.cobblemon.mod.common.api.pokemon.PokemonSpecies.INSTANCE.getByName(species);
+        if (s == null) return null;
+        return com.cobblemon.mod.common.item.PokemonItem.Companion.from(s, new java.util.HashSet<String>(), 1, new org.joml.Vector4f(tint[0], tint[1], tint[2], tint[3]));
+    }
+
     /** The AscensionLib grant's result name, or why there was none. */
     static String grade(Pokemon pokemon, String floor, int zoneTier) {
         Class<?> grants;

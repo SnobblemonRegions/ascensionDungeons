@@ -39,6 +39,7 @@ space. One test below deliberately breaks this.
 | `/dungeon dive` | Inside a dive: the dive's state, and where every chest, nest, Alpha and hazard room is |
 | `/dungeon dive find <tier>` | Your next unopened dive chest holds a Pokémon: `standard`, `starter`, `pseudo`, `legendary` or `mythical`. Nothing appears if this dungeon has none of that tier (see section 8) |
 | `/dungeon dive bank` | Banks everyone's haul now, as a checkpoint would |
+| `/dungeon capsule give <species> [tier] [difficulty]` | Gives you a sealed test capsule, anywhere; `/dungeon capsule bank` clears it. Still at risk at the next login, it's lost like dive loot |
 | `/dungeon goto cell <x> <z>` | Teleports you to a maze cell (-4 to 4) |
 | `/dungeon list`, `/dungeon end <run>` | See all runs; end a stuck one |
 
@@ -163,8 +164,15 @@ you haven't opened. Not every dungeon has every tier:
 | Legendary | Dragon, Electric, Flying, Ice, Normal, Psychic, Rock, Steel (Fire has no dungeon yet) |
 | Mythical | Dark, Grass, Psychic |
 
-- [ ] The chest holds a **capsule**: a Poké/Great/Ultra/Master/Cherish ball by tier, named "Capsule: <species>", with a
-  description. *Does it look good in the hand and in a chest window?*
+- [ ] The chest holds a **sealed capsule**: with the resource pack, a lab tank of tier-coloured fluid with a dark shape inside;
+  without it, Cobblemon's ball for the tier. It glints. The name is the Pokémon and its level, in the tier's colour. *Does the
+  tank read well in a chest and in the hotbar?*
+- [ ] Hover it: stars and tier, types, the rarity diamonds ("Rare or better"), where it was found, **⚠ At risk**, and who it's
+  bound to. *Is anything confusing or too long?*
+- [ ] Every other looted item shows "⚠ Dive loot · at risk" until it's banked; after a checkpoint the line is gone and the item
+  stacks with ordinary ones.
+- [ ] Bank it (checkpoint) or carry it out: it **clears** into Cobblemon's 3D model of the Pokémon, and the tooltip says
+  "▶ Right-click to release". *Not seen in a real client yet: does the model draw in the inventory, the hotbar and the hand?*
 - [ ] A **pseudo-legendary** find is announced to the party; a **legendary** or **mythical** to the whole server.
 - [ ] Right-clicking it **inside the dive** is refused (it's still at risk).
 - [ ] Hand it to another player: they **can't** release it (it's bound to the finder).

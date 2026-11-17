@@ -162,6 +162,21 @@ public final class DiveE2E {
         return new int[] {stacks, marked};
     }
 
+    /** Every marked item (but a capsule) ends its tooltip with the at-risk lines, and no unmarked item has them. */
+    private static boolean warnedExactlyWhenMarked() {
+        for (int i = 0; i < bot.getInventory().getContainerSize(); i++) {
+            ItemStack s = bot.getInventory().getItem(i);
+            if (s.isEmpty() || com.ascensiondungeons.mc.Capsules.read(s) != null) continue;
+            List<String> l = lore(s);
+            boolean warned = l.size() >= 2 && l.get(l.size() - 2).equals("\u26A0 Dive loot \u00b7 at risk");
+            if (warned != (RunLoot.runOf(s) != null)) {
+                AscensionDungeonsLog.LOG.info("DIVE-E2E warning mismatch on {}: marked={} lore={}", s, RunLoot.runOf(s) != null, l);
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static List<int[]> features(String kind) {
         List<int[]> out = new ArrayList<>();
         for (String line : dive().featureLines()) {
@@ -467,7 +482,7 @@ public final class DiveE2E {
                 if (!takeAll()) return false;
                 int[] c = count();
                 for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
-                return c[0] > 0 && c[0] == c[1];
+                return c[0] > 0 && c[0] == c[1] && warnedExactlyWhenMarked();
             }
         }));
         steps.add(new Step("the tutorial explains the Depths and unbanked loot, and the Guide bar turns to getting out", 1500, () -> {
@@ -540,7 +555,7 @@ public final class DiveE2E {
                 int[] c = count();
                 AscensionDungeonsLog.LOG.info("DIVE-E2E chest 1: {} stacks, {} marked: {}", c[0], c[1], describeInventory());
                 carried = c[0];
-                return c[0] > 0 && c[0] == c[1];
+                return c[0] > 0 && c[0] == c[1] && warnedExactlyWhenMarked();
             }
         }));
         if (cobblemon) steps.add(new Step("marked loot can be put on a party Pokémon as a held item", 40, () -> Party.hide(bot)));
@@ -550,7 +565,7 @@ public final class DiveE2E {
                 if (!banked) { dive().operatorCheckpoint(); banked = true; }
                 int[] c = count();
                 boolean heldOk = !cobblemon || Party.heldIsBanked();
-                return c[1] == 0 && c[0] > 0 && heldOk;
+                return c[1] == 0 && c[0] > 0 && heldOk && warnedExactlyWhenMarked();
             }
         }));
         steps.add(new Step("a second chest gives loot that is at risk again", 100, new BooleanSupplier() {
@@ -559,7 +574,7 @@ public final class DiveE2E {
                 if (!used) { use(freshChest()); used = true; return false; }
                 if (!takeAll()) return false;
                 carried = count()[0];
-                return count()[1] > 0;
+                return count()[1] > 0 && warnedExactlyWhenMarked();
             }
         }));
         if (cobblemon) steps.add(new Step("unbanked loot is hidden on the second Pokémon", 40, () -> Party.hideSecond(bot)));
@@ -836,11 +851,17 @@ public final class DiveE2E {
             return nests == 2 && alphas == 2 && hazards == 3 && deepAlphas && heart.is(net.minecraft.world.level.block.Blocks.REINFORCED_DEEPSLATE);
         }));
         steps.add(new Step(label + ": crossing into the deep band puts its name on screen", 100, new BooleanSupplier() {
-            boolean moved;
+            int tried;
+            final int[][] spots = {{9, 0}, {-9, 0}, {0, 9}, {0, -9}, {5, 5}, {-5, -5}, {3, 0}};   // around the Alpha, inside its room on any layout
             @Override public boolean getAsBoolean() {
                 bot.setInvulnerable(true);
                 String[] a = piece("ALPHA");
-                if (!moved) { titles.clear(); teleport(Integer.parseInt(a[3]) + 9, Integer.parseInt(a[4]), Integer.parseInt(a[5])); moved = true; return false; }
+                if (tried == 0 || (dive().bandOf(ID) != 2 && tried < spots.length && bot.tickCount % 5 == 0)) {
+                    if (tried == 0) titles.clear();
+                    int[] o = spots[tried++];
+                    teleport(Integer.parseInt(a[3]) + o[0], Integer.parseInt(a[4]), Integer.parseInt(a[5]) + o[1]);
+                    return false;
+                }
                 AscensionDungeonsLog.LOG.info("DIVE-E2E band: now {}, deepest {}, titles {}", dive().bandOf(ID), dive().deepestBand(ID), titles);
                 return dive().bandOf(ID) == 2 && titles.contains("The Abyssal Cistern");
             }
@@ -1021,7 +1042,7 @@ public final class DiveE2E {
                 if (!used) {
                     chat.clear();
                     for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY);
-                    command("dungeon dive find pseudo");                 // the operator command a playtest uses
+                    opCommand("dungeon dive find pseudo");                 // the operator command a playtest uses
                     use(freshChest());
                     used = true;
                     return false;
@@ -1034,7 +1055,11 @@ public final class DiveE2E {
                         net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(capsule.getItem()), c, lore(capsule));
                 return RunLoot.runOf(capsule) != null && c.getUUID("owner").equals(ID) && c.getString("tier").equals("PSEUDO")
                         && List.of("lapras", "feebas").contains(c.getString("species")) && c.getString("floor").equals("rare")
-                        && capsule.getHoverName().getString().startsWith("Capsule: ") && heard("found a Pseudo-legendary");
+                        && capsule.getHoverName().getString().matches("(Lapras|Feebas)  Lv\\. 10")
+                        && Integer.valueOf(com.ascensiondungeons.outbreak.CapsuleLook.modelId(com.ascensiondungeons.outbreak.PokemonFinds.Tier.PSEUDO)).equals(
+                                java.util.Optional.ofNullable(capsule.get(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA)).map(m -> m.value()).orElse(-1))
+                        && String.join("\n", lore(capsule)).contains("At risk: bank it or carry it out.") && String.join("\n", lore(capsule)).contains("Rare or better")
+                        && heard("found a Pseudo-legendary");
             }
         }));
         steps.add(new Step(label + ": a capsule cannot be released while it is at risk", 20, () -> {
@@ -1052,6 +1077,11 @@ public final class DiveE2E {
                     ItemStack capsule = capsule();
                     if (capsule == null || RunLoot.runOf(capsule) != null) return false;
                     species = com.ascensiondungeons.mc.Capsules.read(capsule).getString("species");
+                    // banked, it clears: Cobblemon's own model of the Pokémon, saying it can be released
+                    String item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(capsule.getItem()).toString();
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E cleared capsule: {} named {}, lore {}", item, capsule.getHoverName().getString(), lore(capsule));
+                    if (!item.equals("cobblemon:pokemon_model") || !String.join("\n", lore(capsule)).contains("Right-click to release") || String.join("\n", lore(capsule)).contains("At risk"))
+                        throw new IllegalStateException("the banked capsule did not clear: " + item + " " + lore(capsule));
                     int before = Party.size(bot);
                     chat.clear();
                     result = com.ascensiondungeons.mc.Capsules.use(bot, capsule);
@@ -1222,6 +1252,33 @@ public final class DiveE2E {
             var r = com.ascensiondungeons.mc.Capsules.use(bot2, c);
             return r == net.minecraft.world.InteractionResult.FAIL && c.getCount() == 1;
         }));
+        steps.add(new Step("/dungeon capsule give hands over a sealed test capsule and /dungeon capsule bank clears it into the Pokémon", 40, new BooleanSupplier() {
+            int phase;
+            @Override public boolean getAsBoolean() {
+                if (phase == 0) {
+                    for (int i = 0; i < bot.getInventory().getContainerSize(); i++) if (com.ascensiondungeons.mc.Capsules.read(bot.getInventory().getItem(i)) != null) bot.getInventory().setItem(i, ItemStack.EMPTY);
+                    opCommand("dungeon capsule give dratini pseudo hard");
+                    phase = 1;
+                    return false;
+                }
+                ItemStack c = capsule();
+                if (c == null) return false;
+                if (phase == 1) {
+                    var data = com.ascensiondungeons.mc.Capsules.read(c);
+                    boolean sealed = com.ascensiondungeons.mc.Capsules.TEST_RUN.equals(RunLoot.runOf(c)) && data.getString("floor").equals("rare")
+                            && String.join("\n", lore(c)).contains("At risk") && c.getHoverName().getString().equals("Dratini  Lv. 10");
+                    AscensionDungeonsLog.LOG.info("DIVE-E2E test capsule: {} {} {}", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(c.getItem()), c.getHoverName().getString(), lore(c));
+                    if (!sealed) throw new IllegalStateException("the test capsule is not a sealed Dratini: " + lore(c));
+                    opCommand("dungeon capsule bank");
+                    phase = 2;
+                    return false;
+                }
+                String item = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(c.getItem()).toString();
+                boolean model = !FabricLoader.getInstance().isModLoaded("cobblemon") || item.equals("cobblemon:pokemon_model");
+                return RunLoot.runOf(c) == null && model && String.join("\n", lore(c)).contains("Right-click to release Dratini.")
+                        && String.join("\n", lore(c)).contains((FabricLoader.getInstance().isModLoaded("cobblemon") ? "Dragon" : "Pseudo-legendary"));
+            }
+        }));
         steps.add(new Step("the leader leaving ends the party for both", 20, () -> {
             command("dive leave");
             var entry = com.ascensiondungeons.mc.DiveEntry.current;
@@ -1238,7 +1295,7 @@ public final class DiveE2E {
                 if (!used) { for (int i = 0; i < bot.getInventory().getContainerSize(); i++) bot.getInventory().setItem(i, ItemStack.EMPTY); use(freshChest()); used = true; return false; }
                 if (!takeAll()) return false;
                 carried = count()[0];
-                return count()[1] > 0;
+                return count()[1] > 0 && warnedExactlyWhenMarked();
             }
         }));
         steps.add(new Step(label + ": loot a second chest", 100, new BooleanSupplier() {
@@ -1379,7 +1436,7 @@ public final class DiveE2E {
                     if (!takeAll()) return false;
                     int[] c = count();
                     AscensionDungeonsLog.LOG.info("DIVE-E2E {} chest: {}", type, describeInventory());
-                    return c[0] > 0 && c[0] == c[1];
+                    return c[0] > 0 && c[0] == c[1] && warnedExactlyWhenMarked();
                 }
             }));
             steps.add(new Step(type + ": the stairway walks back up to the entrance room", 900, new Walk(type + " up", () -> BlockPos.containing(dive().tunnelMouth()), () -> {
@@ -1441,6 +1498,11 @@ public final class DiveE2E {
     /** Runs a command as the stand-in player, the way typing it would. */
     private static void command(String command) {
         bot.server.getCommands().performPrefixedCommand(bot.createCommandSourceStack(), command);
+    }
+
+    /** An operator command, as an operator running a playtest would type it: the bot itself is not an operator. */
+    private static void opCommand(String command) {
+        bot.server.getCommands().performPrefixedCommand(bot.createCommandSourceStack().withPermission(2), command);
     }
 
     /** The lines of an item's description, as plain text. */

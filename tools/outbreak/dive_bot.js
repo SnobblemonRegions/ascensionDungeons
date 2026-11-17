@@ -107,8 +107,24 @@ async function walkOnce(bot, x, y, z, range, ms) {
 async function inv(bot) {
   const r = await cmd(bot, '/data get entity @s Inventory', 1200);
   const sum = re => [...r.matchAll(re)].reduce((n, m) => n + Number(m[1]), 0);
+  // each item of the list, whole: its components come in any order (a marked item also carries the at-risk tooltip lines)
+  let markedTotal = 0;
+  const list = r.indexOf('[');
+  if (list >= 0) {
+    let depth = 0, start = -1, inStr = false;
+    for (let i = list + 1; i < r.length; i++) {
+      const ch = r[i];
+      if (ch === '"' && r[i - 1] !== '\\') inStr = !inStr;
+      if (inStr) continue;
+      if (ch === '{') { if (depth++ === 0) start = i; }
+      else if (ch === '}' && --depth === 0) {
+        const item = r.slice(start, i + 1), m = /^\{count: (\d+)/.exec(item);
+        if (m && item.includes('ascension_run')) markedTotal += Number(m[1]);
+      } else if (ch === ']' && depth === 0) break;
+    }
+  }
   return { tagged: (r.match(/ascension_run/g) || []).length, items: (r.match(/id: "/g) || []).length, raw: r,
-           total: sum(/count: (\d+)/g), markedTotal: sum(/count: (\d+), Slot: \d+b, components: \{"minecraft:custom_data": \{ascension_run/g) };
+           total: sum(/count: (\d+)/g), markedTotal };
 }
 // Step onto the portal and wait for the extraction window; returns {window, shown} or null.
 async function tollWindow(bot, portal) {

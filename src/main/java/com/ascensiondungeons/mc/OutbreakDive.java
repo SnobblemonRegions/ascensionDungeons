@@ -1606,8 +1606,9 @@ public final class OutbreakDive {
         }
         if (find == null) return List.of();
         String dungeon = host.layout().data().name == null ? host.layout().id() : host.layout().data().name;
-        var capsule = Capsules.make(find, PokemonFinds.floor(difficulty), tier(), player, dungeon, difficulty.label());
-        String name = Capsules.displayName(find.species());
+        String bandName = AuthoredLayout.inDepths(room) ? DepthBands.name(host.layout().id(), band) : null;
+        var capsule = Capsules.make(find, PokemonFinds.floor(difficulty), tier(), player, new Capsules.Origin(dungeon, bandName, difficulty.label(), stage()));
+        String name = Capsules.read(capsule).getString("name");
         found.computeIfAbsent(player.getUUID(), k -> new ArrayList<>()).add(new String[] {name + " (" + find.tier().label(), Capsules.read(capsule).getUUID("id").toString()});
         // The big ones are news.
         String who = player.getGameProfile().getName();

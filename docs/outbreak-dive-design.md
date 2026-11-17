@@ -373,12 +373,33 @@ AscensionLib the Pokémon is Cobblemon's own.
 - It is dive loot: marked with the run until banked or carried out, so a knock-out costs it and the toll can take it (your call:
   the extraction window shows it, and fighting the gatekeeper keeps it).
 - It is bound to its finder (your call): only they can release it; it can be handed over, but not opened by anyone else.
-- It is used, not thrown: right-clicking releases the Pokémon to the party, or the PC when the party is full. It looks like a
-  Cobblemon ball by tier (Poké, Great, Ultra, Master, Cherish) with a name and a description.
+- It is used, not thrown: right-clicking releases the Pokémon to the party, or the PC when the party is full.
 - A pseudo-legendary find is announced to the party; a legendary or mythical to the whole server.
 - The recap lists each Pokémon found and whether it was kept or lost.
 
-Rules: `outbreak/PokemonFinds` (unit tested, including the per-dive odds). Game side: `RunLoot.ExtraLoot` (Lootr fills the chest
+**How a capsule looks** (design page: the "Capsule Design" artifact).
+
+- **Two kinds of rare, never mixed up.** The find tier (what kind of Pokémon) has stars and its own name colours: Standard
+  white, Starter green, Pseudo-legendary orange, Legendary a pale champagne gradient, Mythical a pastel gradient, the top two
+  bold and coloured letter by letter. None of them is near an AscensionLib rarity colour (a test checks it). The Ascension
+  rarity only appears in AscensionLib's colours: a row of six diamonds filled up to the difficulty's floor ("Rare or better").
+- **Sealed while at risk.** Cobblemon's ball for the tier (Poké, Great, Ultra, Master, Cherish) with the glint and custom model
+  data 9201-9205. With the resource pack it is a lab tank of tier-coloured fluid with only a dark shape inside: our own art,
+  drawn by `tools/outbreak/make_capsule_art.py`, no Pokémon depicted. Without the pack it is the ball.
+- **Clear once safe.** Banking or carrying it out turns it into Cobblemon's `pokemon_model` item, lightly tinted by tier, which
+  each player's own Cobblemon draws as the real Pokémon. This mod ships no Pokémon art: the server sells ranks, and Cobblemon's
+  models are licensed non-commercial (owner decision, 2026-11-17). Without Cobblemon the capsule keeps its item.
+- **Tooltip**: name and level; stars, tier and "Pokémon Capsule"; types in Cobblemon's colours; the rarity meter and "Graded when
+  released."; where it was found (band, dungeon, difficulty and Outbreak stage); then **⚠ At risk** while sealed or **▶ Right-click
+  to release** once clear; "Bound to <finder> · found <date>". The same for every viewer: a server cannot tailor item text.
+- **All dive loot shows it is at risk.** Every looted item gets two tooltip lines ("⚠ Dive loot · at risk", "Bank it at a checkpoint
+  or carry it out.") while it is marked; banking takes them off again, so banked loot stacks with ordinary items.
+- **Testing:** `/dungeon capsule give <species> [tier] [difficulty]` (operators) gives a sealed test capsule, at risk;
+  `/dungeon capsule bank` banks it so it clears. Like any dive loot, one still at risk is lost at the next login.
+- **Still to do:** opening a capsule should play AscensionLib's reveal card (needs an AscensionLib addition that reports the
+  rarity; its card shows Cobblemon Cards pictures, whose licence also needs checking for a commercial server).
+
+Rules: `outbreak/PokemonFinds` (unit tested, including the per-dive odds) and `outbreak/CapsuleLook` (unit tested). Game side: `RunLoot.ExtraLoot` (Lootr fills the chest
 with the capsule in it), `OutbreakDive.findsFor`, `mc/Capsules` (the item and its use), `mc/CapsuleRelease` (Cobblemon and
 AscensionLib).
 
@@ -403,6 +424,10 @@ tutorial is finished, so nobody loses a haul to being lost in the maze.
 `docs/outbreak-chests-preview.png` is its preview. In the world a model is an `item_display` of `minecraft:popped_chorus_fruit`
 with a custom-model number, over the real Lootr chest. **Off by default** (`features.models`): a player without the pack would
 see a floating chorus fruit. A chest is always identifiable without it (label, sparkles, floor block).
+
+The same `resourcepack/` holds the sealed capsule tanks (`tools/outbreak/make_capsule_art.py resourcepack`). They need no switch:
+without the pack a sealed capsule is simply Cobblemon's ball. A server sends one pack, so merge `resourcepack/` with
+AscensionLib's pack before hosting it.
 
 ## Verification
 
