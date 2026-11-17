@@ -1,6 +1,6 @@
 .gradle/
 build/
-run/
+/run/
 
 # Local-only artifacts
 backups/
@@ -8,3 +8,4 @@ outputs/
 scratch-*/
 testserver/
 *.log
+/logs/

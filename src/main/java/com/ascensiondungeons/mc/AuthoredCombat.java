@@ -56,6 +56,41 @@ public final class AuthoredCombat implements AuthoredBridges.Combat {
     private static final Set<String> RECOVERY = Set.of("recover", "roost", "softboiled", "slackoff", "milkdrink", "moonlight", "morningsun", "synthesis", "shoreup", "healorder", "wish");
     private static final Set<String> DRAIN = Set.of("absorb", "megadrain", "gigadrain", "drainpunch", "leechlife", "hornleech", "drainingkiss", "oblivionwing", "paraboliclcharge", "bitterblade", "matchagotcha", "dreameater");
 
+    private volatile AuthoredBridges.Targeting targeting;
+    private volatile AuthoredBridges.Movement movement;
+    /** How far each Pokémon's own moves work best from: its special attacks reach {@link #RANGED}, its physical ones need a touch. */
+    private final Map<UUID, Double> preferredRange = new HashMap<>();
+
+    @Override
+    public void targeting(AuthoredBridges.Targeting targeting) { this.targeting = targeting; }
+
+    @Override
+    public void movement(AuthoredBridges.Movement movement) { this.movement = movement; }
+
+    /** 7 blocks for a Pokémon whose strongest damaging move is special, 0 for one that must close in. */
+    private double preferredRange(Mob attacker) {
+        if (!(attacker instanceof PokemonEntity pe)) return 0;
+        return preferredRange.computeIfAbsent(attacker.getUUID(), id -> {
+            double special = 0, physical = 0;
+            for (Move m : pe.getPokemon().getMoveSet().getMoves()) {
+                String category = m.getDamageCategory().getName().toLowerCase(java.util.Locale.ROOT);
+                if (category.equals("special")) special = Math.max(special, m.getPower());
+                else if (category.equals("physical")) physical = Math.max(physical, m.getPower());
+            }
+            return special > 0 && special >= physical ? RANGED - 2 : 0.0;
+        });
+    }
+
+    /** Heads for a point (or stands still on it), looking at the target. */
+    private static void go(Mob mob, net.minecraft.world.phys.Vec3 to, LivingEntity target, double speed) {
+        mob.getLookControl().setLookAt(target);
+        if (to.distanceToSqr(mob.position()) < 0.6) { halt(mob); return; }
+        try {
+            mob.getBrain().setMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET, new net.minecraft.world.entity.ai.memory.WalkTarget(to, (float) speed, 0));
+        } catch (RuntimeException ignored) { }
+        mob.getNavigation().moveTo(to.x, to.y, to.z, speed);
+    }
+
     @Override
     public void empower(Mob creature, double damageMultiplier) { empowered.put(creature.getUUID(), damageMultiplier); }
 
@@ -155,14 +190,23 @@ public final class AuthoredCombat implements AuthoredBridges.Combat {
         for (Mob h : hostiles) {
             if (!h.isAlive() || h.level() != level) continue;
             LivingEntity target = null; double best = SIGHT * SIGHT;
+            java.util.List<LivingEntity> inSight = new java.util.ArrayList<>();
             for (ServerPlayer pl : players) {
                 double d = h.distanceToSqr(pl);
+                if (d < SIGHT * SIGHT) inSight.add(pl);
                 if (d < best) { best = d; target = pl; }
             }
             for (PokemonEntity ally : allies) {
                 if (downedUntil.containsKey(ally.getPokemon().getUuid()) || ally.isBattling()) continue;
                 double d = h.distanceToSqr(ally);
+                if (d < SIGHT * SIGHT) inSight.add(ally);
                 if (d < best) { best = d; target = ally; }
+            }
+            // The dungeon may overrule the nearest target (aggro styles); a fault there must not stop the fight.
+            AuthoredBridges.Targeting chooser = targeting;
+            if (chooser != null) {
+                try { target = chooser.choose(h, inSight, target); }
+                catch (RuntimeException e) { com.ascensiondungeons.AscensionDungeonsLog.LOG.error("Targeting failed; using the nearest target", e); }
             }
             if (h instanceof PokemonEntity hp) prepare(hp, level);
             if (target == null) continue;
@@ -410,6 +454,15 @@ public final class AuthoredCombat implements AuthoredBridges.Combat {
         attacker.setTarget(target);
         attacker.getLookControl().setLookAt(target);
         if (attacker instanceof PokemonEntity pe && useMove(pe, target, now, damage)) return;
+        // No move ready: the dungeon may want this one somewhere other than in the target's face (keeping range, waiting its turn,
+        // flanking, falling back, winding up a charge).
+        AuthoredBridges.Movement mover = movement;
+        if (mover != null) {
+            net.minecraft.world.phys.Vec3 to = null;
+            try { to = mover.position(attacker, target, preferredRange(attacker)); }
+            catch (RuntimeException e) { com.ascensiondungeons.AscensionDungeonsLog.LOG.error("Movement failed; closing in", e); }
+            if (to != null) { go(attacker, to, target, 1.2); return; }
+        }
         if (!attacker.getBoundingBox().inflate(1.2).intersects(target.getBoundingBox())) {
             drive(attacker, target, 1.2);
             return;

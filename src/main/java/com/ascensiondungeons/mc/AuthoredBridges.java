@@ -20,12 +20,21 @@ public final class AuthoredBridges {
     /** Places a wild Pokemon (Cobblemon) as the dungeon's creature. Returns null if it could not be placed. */
     public interface PokemonSpawner {
         Mob spawn(ServerLevel level, String species, int pokemonLevel, BlockPos at, float yaw);
+
+        /** Marks a spawned creature as a dungeon enemy: it cannot be caught or drawn into a turn-based battle. */
+        default void hostile(Mob creature) { }
     }
 
     /** Real-time combat between dungeon Pokemon, players and the players' own Pokemon. */
     public interface Combat {
         /** Called every few ticks with the dungeon's hostile creatures. */
         void tick(ServerLevel level, long now, Collection<? extends Mob> hostiles);
+
+        /** Lets the dungeon decide which target a hostile takes; without one a hostile takes the nearest. */
+        void targeting(Targeting targeting);
+
+        /** Lets the dungeon decide where a hostile moves while it has no move to use; without one it closes in. */
+        default void movement(Movement movement) {}
 
         /** Makes a creature hit harder (bosses). */
         void empower(Mob creature, double damageMultiplier);
@@ -38,6 +47,22 @@ public final class AuthoredBridges {
 
         /** The run's level is going away: heal and forget everything about it. */
         void release(ServerLevel level);
+    }
+
+    /** Chooses a hostile's target from the candidates in sight. {@code nearest} is the default choice; null means stand down. */
+    @FunctionalInterface
+    public interface Targeting {
+        net.minecraft.world.entity.LivingEntity choose(Mob hostile, List<net.minecraft.world.entity.LivingEntity> candidates, net.minecraft.world.entity.LivingEntity nearest);
+    }
+
+    /**
+     * Where a hostile should be while it fights. {@code preferredRange} is the distance its own moves work best from (0 for a
+     * fighter that must touch its target). Returns a position to head for, the hostile's own position to stand still, or null to
+     * close in on the target as usual.
+     */
+    @FunctionalInterface
+    public interface Movement {
+        net.minecraft.world.phys.Vec3 position(Mob hostile, net.minecraft.world.entity.LivingEntity target, double preferredRange);
     }
 
     public enum RaidOutcome { VICTORY, DEFEAT, ABORTED }

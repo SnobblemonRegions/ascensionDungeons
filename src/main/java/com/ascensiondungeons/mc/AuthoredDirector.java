@@ -70,6 +70,22 @@ public final class AuthoredDirector implements ArenaDirector {
 
     public void bridges(com.ascensiondungeons.run.RunConfig cfg, AuthoredBridges.PokemonSpawner pokemon, AuthoredBridges.RaidBridge raids, AuthoredBridges.Ascension ascension, AuthoredBridges.Combat combat) {
         this.cfg = cfg; this.pokemon = pokemon; this.raids = raids; this.ascension = ascension; this.combat = combat;
+        // Real-time combat asks the dive which target an enemy may take, so aggro styles apply to dungeon Pokémon too.
+        if (combat != null) combat.targeting((hostile, candidates, nearest) -> {
+            Session s = sessionFor(hostile.level());
+            return s == null || s.dive() == null ? nearest : s.dive().chooseTarget(hostile, candidates, nearest);
+        });
+        // ... and where it stands while it fights: tactics (spacing, turns, flanking, falling back, a boss's charge).
+        if (combat != null) combat.movement((hostile, target, range) -> {
+            Session s = sessionFor(hostile.level());
+            return s == null || s.dive() == null ? null : s.dive().moveIntent(hostile, target, range);
+        });
+    }
+
+    /** Lootr is filling a dive chest for a player: the dive may add a Pokémon capsule. */
+    public java.util.List<net.minecraft.world.item.ItemStack> extraLoot(UUID run, net.minecraft.server.level.ServerPlayer player, net.minecraft.core.BlockPos chest) {
+        Session s = sessionFor(player.level());
+        return s == null || s.dive() == null ? java.util.List.of() : s.dive().findsFor(player, chest);
     }
 
     /** Operator/test aid: sends the player's first Pokemon out. */
@@ -121,6 +137,26 @@ public final class AuthoredDirector implements ArenaDirector {
         if (s != null) s.close();
     }
 
+    /** The dive run that owns this dimension, or null. Used to mark chest loot (see {@link RunLoot}). */
+    public UUID diveRunOf(net.minecraft.resources.ResourceKey<Level> dimension) {
+        for (Session s : sessions.values()) if (s.dive() != null && s.level.dimension().equals(dimension)) return s.run.id();
+        return null;
+    }
+
+    /** Lootr rolled a chest for a player inside a dive. */
+    public void chestLooted(UUID run, net.minecraft.server.level.ServerPlayer player, BlockPos chest) {
+        Session s = sessions.get(run);
+        if (s != null && s.dive() != null) s.dive().chestLooted(player, chest);
+    }
+
+    /** Whether this player is still inside this dive (so loot marked with it is still in play). */
+    public boolean diveLiveFor(UUID run, UUID player) {
+        Session s = sessions.get(run);
+        if (s == null || s.dive() == null || s.dive().settled(player)) return false;
+        Run.Member m = s.run.members().get(player);
+        return m != null && m.presence() != Run.Presence.LEFT;
+    }
+
     /** The session whose level this is, or null if it is not a live authored run level. */
     public Session sessionFor(Level level) {
         for (Session s : sessions.values()) if (s.level == level) return s;
@@ -158,8 +194,12 @@ public final class AuthoredDirector implements ArenaDirector {
     private static final class LeverState { int step; }
 
     /** One run's mutable mechanics state. */
-    public final class Session {
+    public final class Session implements OutbreakDive.Host {
+        @Override public String difficulty() { String chosen = run().difficulty(); return chosen != null ? chosen : cfg.diveDifficulty; }
+
         static final int COMPLETE_DELAY_DEFAULT = 45;
+        /** The Outbreak dive for this run, or null when the dungeon is an ordinary one. */
+        private OutbreakDive dive;
 
         final Run run;
         final ServerLevel level;
@@ -190,10 +230,34 @@ public final class AuthoredDirector implements ArenaDirector {
                 BossState b = new BossState(e.getAsJsonObject());
                 bosses.put(b.id(), b);
             }
+            this.dive = OutbreakDive.create(this);
         }
 
-        public Run run() { return run; }
-        public ServerLevel level() { return level; }
+        public OutbreakDive dive() { return dive; }
+        @Override public AuthoredLayout layout() { return layout; }
+        @Override public Random random() { return rng; }
+        @Override public void leave(UUID player) { RunManager m = manager.get(); if (m != null) m.leave(player); }
+        @Override public void pay(int tier, int arenaWins, boolean bossDefeated, java.util.Collection<UUID> players) {
+            if (ascension != null) ascension.settle(run.id(), "VICTORY", tier, arenaWins, bossDefeated, players);
+        }
+        @Override public void zoneTier(int tier) { if (ascension != null) ascension.openZone(level.dimension().location().toString(), tier); }
+        @Override public void empower(Mob mob, double damageMultiplier) { if (combat != null) combat.empower(mob, damageMultiplier); }
+        @Override public void hostile(Mob mob) { if (pokemon != null) pokemon.hostile(mob); }
+        /** Real-time Pokémon combat runs when the config asks for it, and always in an Outbreak dive (its enemies must fight). */
+        boolean combatOn() { return combat != null && (cfg.authoredCombat || dive != null); }
+        @Override public boolean combatManaged(Mob mob) { return combatOn() && aggressors.contains(mob); }
+        private boolean isTrial(String id) {
+            for (JsonObject m : mechanics) if (id.equals(Jx.s(m, "id", "?"))) return "trial".equals(Jx.s(m, "type", ""));
+            return false;
+        }
+        /** A mechanic was finished: remember it, and tell the dive (a trial is an arena win, a checkpoint banks the haul). */
+        private void finished(String id) {
+            done.add(id);
+            if (dive != null) dive.mechanicDone(id, isTrial(id));
+        }
+
+        @Override public Run run() { return run; }
+        @Override public ServerLevel level() { return level; }
         public AuthoredChunkGenerator generator() { return gen; }
         public boolean isDone(String mechanic) { return done.contains(mechanic); }
         public boolean bossDead(String id) { BossState b = bosses.get(id); return b != null && b.dead; }
@@ -201,10 +265,12 @@ public final class AuthoredDirector implements ArenaDirector {
         String describe() {
             StringBuilder sb = new StringBuilder(layout.id()).append(": done=").append(done).append(" bosses=");
             bosses.forEach((k, b) -> sb.append(k).append(b.dead ? ":dead " : b.mob != null ? ":alive " : ":idle "));
+            if (dive != null) sb.append("| ").append(dive.describe());
             return sb.toString();
         }
 
         void close() {
+            if (dive != null) dive.close();
             tasks.clear();
             if (combat != null) combat.release(level);
             for (BossState b : bosses.values()) {
@@ -213,7 +279,7 @@ public final class AuthoredDirector implements ArenaDirector {
             }
         }
 
-        void later(long delayTicks, Runnable action) { tasks.add(new Task(now + delayTicks, seq++, action)); }
+        @Override public void later(long delayTicks, Runnable action) { tasks.add(new Task(now + delayTicks, seq++, action)); }
 
         void tick(long tickNow) {
             boolean first = now == 0;
@@ -225,10 +291,11 @@ public final class AuthoredDirector implements ArenaDirector {
                 String intro = Jx.s(layout.data().completion, "intro", layout.data().name);
                 say(intro, ChatFormatting.AQUA);
             }
-            if (combat != null && cfg.authoredCombat && now % 2 == 0) {
+            if (combatOn() && now % 2 == 0) {
                 aggressors.removeIf(m -> !m.isAlive());
                 combat.tick(level, now, aggressors);
             }
+            if (dive != null) dive.tick(now, players);
             if (players.isEmpty()) return;
             if (now % 10 == 0) activateRooms(players);
             for (JsonElement e : layout.data().hazards) hazard(e.getAsJsonObject(), players);
@@ -241,7 +308,7 @@ public final class AuthoredDirector implements ArenaDirector {
         /** Dungeon Pokemon that hunt the players while real-time combat is on. */
         final List<Mob> aggressors = new ArrayList<>();
 
-        List<ServerPlayer> players() {
+        @Override public List<ServerPlayer> players() {
             List<ServerPlayer> out = new ArrayList<>();
             for (ServerPlayer p : level.players()) if (p.isAlive() && !p.isSpectator()) out.add(p);
             return out;
@@ -249,12 +316,12 @@ public final class AuthoredDirector implements ArenaDirector {
 
         // ---- helpers ---------------------------------------------------------------------------------------
 
-        BlockPos world(int[] c) { return gen.toWorld(c); }
-        int[] schem(Entity e) { return gen.toSchematic(e.blockPosition()); }
-        double healthFactor() { return 1.0 + 0.6 * (partySizeAtStart - 1); }
+        @Override public BlockPos world(int[] c) { return gen.toWorld(c); }
+        @Override public int[] schem(Entity e) { return gen.toSchematic(e.blockPosition()); }
+        @Override public double healthFactor() { return 1.0 + 0.6 * (partySizeAtStart - 1); }
         boolean peaceful() { return level.getDifficulty() == net.minecraft.world.Difficulty.PEACEFUL; }
 
-        void say(String text, ChatFormatting colour) {
+        @Override public void say(String text, ChatFormatting colour) {
             for (ServerPlayer p : level.players()) p.sendSystemMessage(Component.literal(text).withStyle(colour));
         }
 
@@ -422,7 +489,7 @@ public final class AuthoredDirector implements ArenaDirector {
                 sound(at, Jx.s(m, "okSound", "minecraft:block.note_block.chime"), 1.5f, 0.8f + 0.15f * step);
                 if (step >= order.length) {
                     seqStep.put(id, 0);
-                    done.add(id);
+                    finished(id);
                     say(Jx.s(m, "doneText", "The pattern is complete."), ChatFormatting.GOLD);
                     play(Jx.a(m, "onDone"));
                     return;
@@ -444,7 +511,7 @@ public final class AuthoredDirector implements ArenaDirector {
                 if (!st.hasProperty(net.minecraft.world.level.block.state.properties.BlockStateProperties.POWERED)) return;
                 if (st.getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.POWERED) != Jx.b(lv, "on", true)) return;
             }
-            done.add(id);
+            finished(id);
             say(Jx.s(m, "doneText", "The mechanisms settle into place."), ChatFormatting.GOLD);
             play(Jx.a(m, "onDone"));
         }
@@ -453,7 +520,7 @@ public final class AuthoredDirector implements ArenaDirector {
             JsonArray steps = Jx.a(m, "onStep");
             if (index < steps.size() && steps.get(index).isJsonArray()) play(steps.get(index).getAsJsonArray());
             if (st.step >= Jx.a(m, "levers").size()) {
-                done.add(id);
+                finished(id);
                 play(Jx.a(m, "onDone"));
             }
         }
@@ -477,7 +544,7 @@ public final class AuthoredDirector implements ArenaDirector {
                     return true;
                 }
                 if (key != null && Jx.b(m, "consume", true)) held.shrink(1);
-                done.add(id);
+                finished(id);
                 say(player.getName().getString() + " " + Jx.s(m, "verb", "unlocks the way."), ChatFormatting.GOLD);
                 play(Jx.a(m, "onOpen"));
                 return true;
@@ -553,10 +620,11 @@ public final class AuthoredDirector implements ArenaDirector {
             return com.ascensiondungeons.run.SpawnTable.pick(entries, rng);
         }
 
-        Mob spawn(JsonObject def, int[] cell, double healthMul) {
+        @Override public Mob spawn(JsonObject def, int[] cell, double healthMul) {
             var chosen = pick(def);
             if (chosen != null) {
-                int lvl = com.ascensiondungeons.run.SpawnTable.level(chosen, rng) + Math.max(0, partySizeAtStart - 1) * Jx.i(Jx.o(layout.data().pokemon, "scaling"), "perPlayer", 0);
+                int lvl = com.ascensiondungeons.run.SpawnTable.level(chosen, rng) + Math.max(0, partySizeAtStart - 1) * Jx.i(Jx.o(layout.data().pokemon, "scaling"), "perPlayer", 0)
+                        + Jx.i(def, "levelBonus", 0);
                 Mob pk = pokemon.spawn(level, chosen.species, Math.min(100, lvl), world(cell), rng.nextFloat() * 360f);
                 if (pk != null) { aggressors.add(pk); return pk; }
             }
@@ -804,7 +872,7 @@ public final class AuthoredDirector implements ArenaDirector {
             if (!t.mobs.isEmpty()) return;
             t.wave++;
             if (t.wave >= waves.size()) {
-                done.add(id);
+                finished(id);
                 play(Jx.a(m, "onDone"));
                 return;
             }
@@ -1000,6 +1068,7 @@ public final class AuthoredDirector implements ArenaDirector {
 
         void onDeath(LivingEntity e) {
             for (BossState b : bosses.values()) if (e == b.mob && !b.dead) bossDied(b);
+            if (dive != null) dive.entityDied(e);
         }
 
         private void bossDied(BossState b) {
@@ -1011,7 +1080,7 @@ public final class AuthoredDirector implements ArenaDirector {
             play(Jx.a(b.def, "onDeath"));
             JsonObject comp = layout.data().completion;
             if (b.id().equals(Jx.s(comp, "boss", ""))) {
-                settleRewards();
+                if (dive != null) dive.bossDefeated(); else settleRewards();
                 completeAt = now + 20L * Jx.i(comp, "delaySeconds", COMPLETE_DELAY_DEFAULT);
                 say(Jx.s(comp, "message", "The dungeon is yours. It will close shortly."), ChatFormatting.AQUA);
             }

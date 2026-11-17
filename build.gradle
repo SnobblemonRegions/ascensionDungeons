@@ -28,7 +28,13 @@ dependencies {
     modImplementation 'maven.modrinth:EltpO5cN:nar56EsW' // Lootr 1.11.38.127
     modImplementation 'maven.modrinth:9s6osm5g:HpMb5wGb' // Cloth Config (Lootr dependency)
     // Soft dependency: only the owned-encounter API package is used, and only when the mod is installed.
-    modCompileOnly files('L:/ascensionDungeons/testserver/mods-replaced-20261016/CobbleRaids-0.8.166-audit-hardening.jar')
+    // Pass -PcobbleRaidsJar=<path to a CobbleRaids jar>; the author's original local path is used only if it exists.
+    def cobbleRaidsJar = project.findProperty('cobbleRaidsJar') ?: 'L:/ascensionDungeons/testserver/mods-replaced-20261016/CobbleRaids-0.8.166-audit-hardening.jar'
+    if (file(cobbleRaidsJar).exists()) {
+        modCompileOnly files(cobbleRaidsJar)
+    } else {
+        logger.warn("CobbleRaids jar not found at ${cobbleRaidsJar}; com.cobbleraids.api.encounter.* will not compile. Pass -PcobbleRaidsJar=<path>.")
+    }
     modImplementation include('xyz.nucleoid:fantasy:0.6.4+1.21')
 }
 dependencies {

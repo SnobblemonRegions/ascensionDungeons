@@ -26,6 +26,17 @@ public final class DungeonCommands {
     public DungeonCommands(Supplier<RunManager> manager) { this.manager = manager; }
 
     public void register(CommandDispatcher<CommandSourceStack> d) {
+        // /dive: the way in for players. A picker of the type dungeons, and a party made by invitation.
+        d.register(Commands.literal("dive").requires(s -> { DiveEntry e = DiveEntry.current; return e == null || e.openToAll() || s.hasPermission(2); })
+                .executes(ctx -> { DiveEntry e = entry(ctx); if (e == null) return 0; e.open(ctx.getSource().getPlayerOrException()); return 1; })
+                .then(Commands.literal("invite").then(Commands.argument("player", EntityArgument.player()).executes(ctx -> {
+                    DiveEntry e = entry(ctx);
+                    return e != null && e.invite(ctx.getSource().getPlayerOrException(), EntityArgument.getPlayer(ctx, "player")) ? 1 : 0;
+                })))
+                .then(Commands.literal("accept").executes(ctx -> { DiveEntry e = entry(ctx); return e != null && e.accept(ctx.getSource().getPlayerOrException()) ? 1 : 0; }))
+                .then(Commands.literal("leave").executes(ctx -> { DiveEntry e = entry(ctx); return e != null && e.leave(ctx.getSource().getPlayerOrException()) ? 1 : 0; }))
+                .then(Commands.literal("party").executes(ctx -> { DiveEntry e = entry(ctx); if (e == null) return 0; reply(ctx, e.describe(ctx.getSource().getPlayerOrException())); return 1; })));
+
         d.register(Commands.literal("dungeon")
                 .then(Commands.literal("types").executes(ctx -> {
                     com.ascensiondungeons.gen.type.TypeCatalogue.all().forEach(t -> reply(ctx, t.id() + ": 5 rooms, 15 landmarks, arena; " + (t.playable() ? "playable blockout" : "planned")));
@@ -71,6 +82,26 @@ public final class DungeonCommands {
                     reply(ctx, left ? "You left the dungeon." : "You are not in a dungeon run.");
                     return left ? 1 : 0;
                 }))
+                .then(Commands.literal("guide").executes(ctx -> {
+                    // The tutorial's notes, for anyone, anywhere: a chest window of pages to hover over.
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    AuthoredDirector director = AuthoredDirector.current;
+                    AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                    GuideMenu.open(p, OnboardingStore.of(p.server).progress(p.getUUID()), s != null && s.dive() != null ? s.dive().tollPercent() : 35);
+                    return 1;
+                }))
+                .then(Commands.literal("tutorial").executes(ctx -> {
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    var progress = OnboardingStore.of(p.server).progress(p.getUUID());
+                    reply(ctx, "Dive tutorial: " + (progress.off() ? "off" : progress.graduated() ? "finished (you still get a tip the first time you meet something new)" : "on")
+                            + ". Dives " + progress.dives() + ", extractions " + progress.extractions() + ", knock-outs " + progress.knockOuts()
+                            + ". First extraction: " + (progress.firstExtractionFree() ? "free, still to come" : "used")
+                            + ". First knock-out: " + (progress.firstKnockOutSoft() ? "softer, still to come" : "used")
+                            + ". Use /dungeon tutorial on, off or reset; /dungeon guide opens the notes.");
+                    return 1;
+                }).then(Commands.literal("off").executes(ctx -> tutorial(ctx, "off")))
+                        .then(Commands.literal("on").executes(ctx -> tutorial(ctx, "on")))
+                        .then(Commands.literal("reset").executes(ctx -> tutorial(ctx, "reset"))))
                 .then(Commands.literal("status").executes(ctx -> {
                     ServerPlayer p = ctx.getSource().getPlayerOrException();
                     RunManager m = manager.get();
@@ -83,6 +114,38 @@ public final class DungeonCommands {
                     m.runs().forEach(r -> reply(ctx, r.id() + " " + describe(r, m.now())));
                     return 1;
                 }))
+                .then(Commands.literal("dive").requires(s -> s.hasPermission(2)).executes(ctx -> {
+                    // Operator aid: the Outbreak dive of the run level the operator stands in, and where its features are.
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    AuthoredDirector director = AuthoredDirector.current;
+                    AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                    if (s == null || s.dive() == null) { ctx.getSource().sendFailure(Component.literal("You are not inside an Outbreak dive.")); return 0; }
+                    reply(ctx, s.dive().describe());
+                    for (String line : s.dive().featureLines()) reply(ctx, "feature " + line);
+                    return 1;
+                }).then(Commands.literal("bank").executes(ctx -> {
+                    ServerPlayer p = ctx.getSource().getPlayerOrException();
+                    AuthoredDirector director = AuthoredDirector.current;
+                    AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                    if (s == null || s.dive() == null) { ctx.getSource().sendFailure(Component.literal("You are not inside an Outbreak dive.")); return 0; }
+                    s.dive().operatorCheckpoint();
+                    return 1;
+                })).then(Commands.literal("find").then(Commands.argument("tier", StringArgumentType.word())
+                        .suggests((ctx, builder) -> net.minecraft.commands.SharedSuggestionProvider.suggest(
+                                java.util.Arrays.stream(com.ascensiondungeons.outbreak.PokemonFinds.Tier.values()).map(t -> t.name().toLowerCase(java.util.Locale.ROOT)), builder))
+                        .executes(ctx -> {
+                            // Operator aid for playtests: this player's next opened dive chest holds a Pokémon of this tier.
+                            ServerPlayer p = ctx.getSource().getPlayerOrException();
+                            AuthoredDirector director = AuthoredDirector.current;
+                            AuthoredDirector.Session s = director == null ? null : director.sessionFor(p.level());
+                            if (s == null || s.dive() == null) { ctx.getSource().sendFailure(Component.literal("You are not inside an Outbreak dive.")); return 0; }
+                            com.ascensiondungeons.outbreak.PokemonFinds.Tier tier;
+                            try { tier = com.ascensiondungeons.outbreak.PokemonFinds.Tier.valueOf(StringArgumentType.getString(ctx, "tier").toUpperCase(java.util.Locale.ROOT)); }
+                            catch (IllegalArgumentException e) { ctx.getSource().sendFailure(Component.literal("Tiers: standard, starter, pseudo, legendary, mythical.")); return 0; }
+                            s.dive().forceFind(p.getUUID(), tier);
+                            reply(ctx, "Your next dive chest holds a " + tier.label() + " Pokémon, if this dungeon has one of that tier (else none). Open a dive chest you have not opened yet.");
+                            return 1;
+                        }))))
                 .then(Commands.literal("chest").requires(s -> s.hasPermission(2)).executes(ctx -> {
                     ServerPlayer p = ctx.getSource().getPlayerOrException();
                     var id = net.minecraft.resources.ResourceLocation.parse("lootr:lootr_chest");
@@ -202,6 +265,28 @@ public final class DungeonCommands {
         String left = r.state() == com.ascensiondungeons.run.RunState.ACTIVE
                 ? ", " + Math.max(0, (r.deadline() - now) / 20) + "s left" : "";
         return r.state() + " (" + r.members().size() + " player(s)" + left + ")";
+    }
+
+    private static DiveEntry entry(CommandContext<CommandSourceStack> ctx) {
+        DiveEntry e = DiveEntry.current;
+        if (e == null) ctx.getSource().sendFailure(Component.literal("Dungeons are not available right now."));
+        return e;
+    }
+
+    /** Turns a player's own dive tutorial on or off, or starts it over. It takes effect from their next dive. */
+    private static int tutorial(CommandContext<CommandSourceStack> ctx, String what) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        ServerPlayer p = ctx.getSource().getPlayerOrException();
+        OnboardingStore store = OnboardingStore.of(p.server);
+        var progress = store.progress(p.getUUID());
+        switch (what) {
+            case "off" -> { progress.setOff(true); reply(ctx, "Dive tutorial off: no Guide bar and no tips. /dungeon tutorial on brings it back."); }
+            case "on" -> { progress.setOff(false); reply(ctx, "Dive tutorial on."); }
+            default -> { progress.reset(); reply(ctx, "Dive tutorial started over: your next dive is taught from the beginning."
+                    + (progress.firstExtractionFree() ? "" : " (Your free first extraction has been used; that does not come back.)")
+                    + (progress.firstKnockOutSoft() ? "" : " (Your softer first knock-out has been used; that does not come back either.)")); }
+        }
+        store.setDirty();
+        return 1;
     }
 
     private static void reply(CommandContext<CommandSourceStack> ctx, String text) {
