@@ -169,3 +169,7 @@ _Avoid_: ability (a Pokémon ability, and AscensionLib avoids it too), skill.
 **Curse altar**: Touch it to push the Outbreak ahead in exchange for a win.
 
 **Chest model**: The resource-pack model shown over a chest; one per rarity and kind. Optional: a chest is always identifiable without it.
+
+## Releases
+
+A version bump in build.gradle needs a matching newest entry in src/main/resources/ascensiondungeons/CHANGELOG.md. It ships in the jar at ascensiondungeons/CHANGELOG.md and is shown to players in game by Snobblemon Server, so write it for players (what they will notice, no config keys or class names) and keep to its four line kinds: the '# Ascension Dungeons changelog' title, '## <version> (YYYY-MM-DD)', '### New', '### Changed' or '### Fixed', and '- ' bullets. validation/validate_changelog.py enforces this. Call it the Player Changelog, not patch notes or release notes.
